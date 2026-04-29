@@ -91,7 +91,16 @@ export default function TrusteraLandingPage() {
       <section className="max-w-6xl mx-auto px-6 py-20">
         <h2 className="text-3xl font-bold text-center">Trusted by operations leaders</h2>
         <div className="grid md:grid-cols-3 gap-5 mt-8">
-          {['Finally one place for compliance visibility.','Cuts admin workload dramatically.','Exactly what shift businesses need.'].map((t,i)=>(<div key={i} className="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-slate-300">“{t}”<div className="mt-3 text-sm text-slate-500">Pilot User</div></div>))}
+          {[
+  ['Finally one place for compliance visibility.', 'Operations Manager, Facilities Company'],
+  ['Cuts admin workload dramatically.', 'Compliance Lead, Care Provider'],
+  ['Exactly what shift businesses need.', 'Site Supervisor, Cleaning Contractor']
+].map((item,i)=>(
+  <div key={i} className="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-slate-300">
+    “{item[0]}”
+    <div className="mt-3 text-sm text-slate-500">{item[1]}</div>
+  </div>
+))}
         </div>
       </section>
 
