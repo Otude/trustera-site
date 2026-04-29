@@ -2,129 +2,292 @@ import { motion } from 'framer-motion';
 
 export default function TrusteraLandingPage() {
   const features = [
-    'Compliance tracking', 'Expiry alerts', 'Trust scoring', 'Incident logs',
-    'Attendance intelligence', 'Audit records', 'Multi-site dashboards', 'Role-based access'
+    'Compliance tracking',
+    'Expiry alerts',
+    'Trust scoring',
+    'Incident logs',
+    'Attendance intelligence',
+    'Audit records',
+    'Multi-site dashboards',
+    'Role-based access'
   ];
-  const sectors = ['Cleaning','Care Homes','Security','Warehousing','Facilities Management','Hospitality'];
-  const stats = [['97%','Compliance Visibility'],['42%','Less Admin Time'],['24/7','Risk Monitoring']];
-  const plans = [['Starter','£99/mo','Up to 25 workers'],['Growth','£249/mo','Up to 100 workers'],['Enterprise','Custom','Multi-site operations']];
+
+  const sectors = [
+    'Cleaning',
+    'Care Homes',
+    'Security',
+    'Warehousing',
+    'Facilities Management',
+    'Hospitality'
+  ];
+
+  const stats = [
+    ['97%', 'Compliance Visibility'],
+    ['42%', 'Less Admin Time'],
+    ['24/7', 'Risk Monitoring']
+  ];
+
+  const plans = [
+    ['Starter', '£99/mo', 'Up to 25 workers'],
+    ['Growth', '£249/mo', 'Up to 100 workers'],
+    ['Enterprise', 'Custom', 'Multi-site operations']
+  ];
+
+  const testimonials = [
+    ['Finally one place for compliance visibility.', 'Operations Manager, Facilities Company'],
+    ['Cuts admin workload dramatically.', 'Compliance Lead, Care Provider'],
+    ['Exactly what shift businesses need.', 'Site Supervisor, Cleaning Contractor']
+  ];
 
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans overflow-x-hidden">
       <header className="sticky top-0 z-50 backdrop-blur-xl border-b border-slate-800/60 bg-slate-950/75">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="https://res.cloudinary.com/dmtpkpdd2/image/upload/f_auto,q_auto/logo_jj_dvjqts" alt="Jemadi logo" className="w-12 h-12 rounded-xl bg-white p-1.5 shadow-lg shadow-blue-500/20 ring-1 ring-white/20" />
+            <img
+              src="https://res.cloudinary.com/dmtpkpdd2/image/upload/f_auto,q_auto/logo_jj_dvjqts"
+              alt="Jemadi logo"
+              className="w-12 h-12 rounded-xl bg-white p-1.5 shadow-lg shadow-blue-500/20 ring-1 ring-white/20"
+            />
             <div>
-              <div className="text-2xl font-bold tracking-tight flex items-center gap-2">Trustera <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/20">BETA</span></div>
-              <div className="text-xs text-slate-400 tracking-wide uppercase">Powered by Jemadi</div>
+              <div className="text-2xl font-bold tracking-tight flex items-center gap-2">
+                Trustera
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/20">
+                  BETA
+                </span>
+              </div>
+              <div className="text-xs text-slate-400 tracking-wide uppercase">
+                Powered by Jemadi
+              </div>
             </div>
           </div>
+
           <nav className="hidden md:flex gap-6 text-sm text-slate-300">
-            <a href="#features">Features</a>
-            <a href="#sectors">Sectors</a>
-            <a href="#contact">Early Access</a>
+            <a href="#features" className="hover:text-white">Features</a>
+            <a href="#sectors" className="hover:text-white">Sectors</a>
+            <a href="#contact" className="hover:text-white">Early Access</a>
           </nav>
         </div>
       </header>
 
       <section className="relative max-w-6xl mx-auto px-6 py-24 grid md:grid-cols-2 gap-12 items-center">
         <div className="absolute inset-0 -z-10 bg-gradient-to-r from-blue-600/10 to-cyan-400/10 blur-3xl" />
-        <motion.div initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} transition={{duration:0.7}}>
-          <p className="text-blue-400 text-sm mb-3">Built for regulated frontline teams</p>
-          <h1 className="text-5xl md:text-6xl font-bold leading-tight">Workforce Compliance Intelligence.</h1>
-          <p className="mt-6 text-slate-300 text-lg max-w-xl">Track worker compliance, monitor reliability, and reduce operational risk with one powerful platform.</p>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7 }}
+        >
+          <p className="text-blue-400 text-sm mb-3">
+            Built for regulated frontline teams
+          </p>
+
+          <h1 className="text-5xl md:text-6xl font-bold leading-tight">
+            Reduce workforce risk. Automate compliance. Resolve incidents faster.
+          </h1>
+
+          <p className="mt-6 text-slate-300 text-lg max-w-xl">
+            Trustera helps operations teams track workforce reliability, monitor compliance,
+            and manage incidents in one platform.
+          </p>
+
           <div className="mt-8 flex flex-wrap gap-4">
-            <button className="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30">Join Waitlist</button>
-            <button className="border border-slate-700 hover:border-slate-500 px-6 py-3 rounded-2xl">Schedule Demo</button>
+            <a
+              href="#contact"
+              className="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30 inline-block"
+            >
+              Join Early Access
+            </a>
+
+            <a
+              href="#contact"
+              className="border border-slate-700 hover:border-slate-500 px-6 py-3 rounded-2xl inline-block"
+            >
+              Request Demo
+            </a>
           </div>
         </motion.div>
 
-        <motion.div initial={{opacity:0,scale:0.95}} animate={{opacity:1,scale:1}} transition={{duration:0.8}} className="bg-slate-900/80 backdrop-blur rounded-3xl p-6 border border-slate-800 shadow-2xl">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.8 }}
+          className="bg-slate-900/80 backdrop-blur rounded-3xl p-6 border border-slate-800 shadow-2xl"
+        >
           <div className="grid grid-cols-2 gap-4">
             {[
-              ['Active Workers','46'],['Critical Alerts','2'],['Avg Trust Score','84'],['Expiring Docs','3']
-            ].map((card,i)=>(
+              ['Active Workers', '46'],
+              ['Critical Alerts', '2'],
+              ['Avg Trust Score', '84'],
+              ['Expiring Docs', '3']
+            ].map((card, i) => (
               <div key={i} className="bg-slate-800 rounded-2xl p-4">
                 <div className="text-sm text-slate-400">{card[0]}</div>
                 <div className="text-3xl font-bold mt-2">{card[1]}</div>
               </div>
             ))}
           </div>
+
           <div className="mt-5 h-28 rounded-2xl bg-gradient-to-r from-blue-600/20 to-cyan-400/20 border border-slate-800 flex items-end gap-2 p-3">
-            {[30,55,45,70,60,85,78].map((h,i)=><div key={i} className="flex-1 bg-blue-500/70 rounded-t-lg" style={{height:`${h}%`}} />)}
+            {[30, 55, 45, 70, 60, 85, 78].map((h, i) => (
+              <div
+                key={i}
+                className="flex-1 bg-blue-500/70 rounded-t-lg"
+                style={{ height: `${h}%` }}
+              />
+            ))}
           </div>
         </motion.div>
       </section>
 
       <section className="max-w-6xl mx-auto px-6 py-10">
         <div className="grid md:grid-cols-3 gap-4">
-          {stats.map((s,i)=>(<div key={i} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-center"><div className="text-3xl font-bold text-blue-300">{s[0]}</div><div className="text-sm text-slate-400 mt-1">{s[1]}</div></div>))}
+          {stats.map((s, i) => (
+            <div
+              key={i}
+              className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-center"
+            >
+              <div className="text-3xl font-bold text-blue-300">{s[0]}</div>
+              <div className="text-sm text-slate-400 mt-1">{s[1]}</div>
+            </div>
+          ))}
         </div>
       </section>
 
       <section id="features" className="max-w-6xl mx-auto px-6 py-20">
-        <h2 className="text-3xl font-bold">Everything needed to manage workforce trust</h2>
+        <h2 className="text-3xl font-bold">
+          Everything needed to manage workforce trust
+        </h2>
+
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 mt-8">
-          {features.map((item,i)=>(
-            <div key={i} className="bg-slate-900 hover:bg-slate-800 transition border border-slate-800 rounded-2xl p-5">{item}</div>
+          {features.map((item, i) => (
+            <div
+              key={i}
+              className="bg-slate-900 hover:bg-slate-800 transition border border-slate-800 rounded-2xl p-5"
+            >
+              {item}
+            </div>
           ))}
         </div>
       </section>
 
       <section id="sectors" className="py-20 bg-slate-900/50">
         <div className="max-w-6xl mx-auto px-6">
-          <h2 className="text-3xl font-bold">Built for shift-based industries</h2>
+          <h2 className="text-3xl font-bold">
+            Built for shift-based industries
+          </h2>
+
           <div className="grid md:grid-cols-3 gap-5 mt-8">
-            {sectors.map((item,i)=>(<div key={i} className="rounded-2xl border border-slate-800 bg-slate-950 p-5">{item}</div>))}
+            {sectors.map((item, i) => (
+              <div
+                key={i}
+                className="rounded-2xl border border-slate-800 bg-slate-950 p-5"
+              >
+                {item}
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
       <section className="max-w-6xl mx-auto px-6 py-20">
-        <h2 className="text-3xl font-bold text-center">Simple pricing for growing teams</h2>
+        <h2 className="text-3xl font-bold text-center">
+          Simple pricing for growing teams
+        </h2>
+
+        <p className="text-center text-slate-400 mt-3">
+          Designed for operations-heavy businesses managing shift-based teams.
+        </p>
+
         <div className="grid md:grid-cols-3 gap-5 mt-8">
-          {plans.map((p,i)=>(<div key={i} className="rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center"><div className="text-xl font-semibold">{p[0]}</div><div className="text-4xl font-bold mt-4">{p[1]}</div><div className="text-slate-400 mt-2">{p[2]}</div><button className="mt-6 w-full bg-blue-600 hover:bg-blue-500 px-4 py-3 rounded-2xl">Choose Plan</button></div>))}
+          {plans.map((p, i) => (
+            <div
+              key={i}
+              className="rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center"
+            >
+              <div className="text-xl font-semibold">{p[0]}</div>
+              <div className="text-4xl font-bold mt-4">{p[1]}</div>
+              <div className="text-slate-400 mt-2">{p[2]}</div>
+
+              <a
+                href="#contact"
+                className="mt-6 w-full bg-blue-600 hover:bg-blue-500 px-4 py-3 rounded-2xl inline-block"
+              >
+                Choose Plan
+              </a>
+            </div>
+          ))}
         </div>
       </section>
 
       <section className="max-w-6xl mx-auto px-6 py-20">
-        <h2 className="text-3xl font-bold text-center">Trusted by operations leaders</h2>
+        <h2 className="text-3xl font-bold text-center">
+          Trusted by operations leaders
+        </h2>
+
         <div className="grid md:grid-cols-3 gap-5 mt-8">
-          {[
-  ['Finally one place for compliance visibility.', 'Operations Manager, Facilities Company'],
-  ['Cuts admin workload dramatically.', 'Compliance Lead, Care Provider'],
-  ['Exactly what shift businesses need.', 'Site Supervisor, Cleaning Contractor']
-].map((item,i)=>(
-  <div key={i} className="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-slate-300">
-    “{item[0]}”
-    <div className="mt-3 text-sm text-slate-500">{item[1]}</div>
-  </div>
-))}
+          {testimonials.map((item, i) => (
+            <div
+              key={i}
+              className="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-slate-300"
+            >
+              “{item[0]}”
+              <div className="mt-3 text-sm text-slate-500">{item[1]}</div>
+            </div>
+          ))}
         </div>
       </section>
 
       <section id="contact" className="max-w-4xl mx-auto px-6 py-24 text-center">
-        <h2 className="text-4xl font-bold">Join the early access programme</h2>
-        <p className="mt-4 text-slate-300">Be among the first UK businesses modernising compliance and workforce trust.</p>
-        <div className="mt-8 grid md:grid-cols-3 gap-4">
-          <input className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3" placeholder="Name" />
-          <input className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3" placeholder="Company" />
-          <input className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3" placeholder="Email" />
+        <h2 className="text-4xl font-bold">
+          Join the early access programme
+        </h2>
+
+        <p className="mt-4 text-slate-300">
+          Be among the first UK businesses modernising compliance, workforce trust,
+          and incident intelligence.
+        </p>
+
+        <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900 p-4">
+          <iframe
+            src="PASTE_YOUR_TALLY_FORM_LINK_HERE"
+            width="100%"
+            height="520"
+            frameBorder="0"
+            marginHeight="0"
+            marginWidth="0"
+            title="Trustera Early Access Form"
+          />
         </div>
-        <button className="mt-5 bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30">Request Access</button>
+
+        <p className="mt-4 text-sm text-slate-500">
+          Prefer email? Contact hello@jemadi.co.uk
+        </p>
       </section>
 
       <section className="max-w-6xl mx-auto px-6 pb-16">
         <div className="rounded-3xl border border-slate-800 bg-gradient-to-r from-blue-600/20 to-cyan-500/10 p-8 text-center">
-          <h3 className="text-3xl font-bold">Ready to modernise workforce trust?</h3>
-          <p className="text-slate-300 mt-3">Join the next generation of compliance-first operators.</p>
-          <button className="mt-6 bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30">Join Waitlist</button>
+          <h3 className="text-3xl font-bold">
+            Ready to modernise workforce trust?
+          </h3>
+
+          <p className="text-slate-300 mt-3">
+            Join the next generation of compliance-first operators.
+          </p>
+
+          <a
+            href="#contact"
+            className="mt-6 bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30 inline-block"
+          >
+            Join Early Access
+          </a>
         </div>
       </section>
 
       <footer className="border-t border-slate-800">
-        <div className="max-w-6xl mx-auto px-6 py-8 text-sm text-slate-400">Trustera by Jemadi • Developed by Jemadi Group Ltd • hello@jemadi.co.uk • Manchester, United Kingdom</div>
+        <div className="max-w-6xl mx-auto px-6 py-8 text-sm text-slate-400">
+          Trustera by Jemadi • Developed by Jemadi Group Ltd • hello@jemadi.co.uk • Manchester, United Kingdom
+        </div>
       </footer>
     </div>
   );
