@@ -1,33 +1,121 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Trustera</title>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Trustera by Jemadi</title>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0b0f19;
+      color: white;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 60px 20px;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 48px;
+      margin-bottom: 10px;
+    }
+
+    p {
+      font-size: 18px;
+      color: #cbd5e1;
+      margin-bottom: 30px;
+    }
+
+    .btn {
+      padding: 14px 28px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      background: #2563eb;
+      color: white;
+      cursor: pointer;
+    }
+
+    .btn:hover {
+      background: #1d4ed8;
+    }
+
+    .section {
+      margin-top: 80px;
+    }
+
+    .card {
+      background: #111827;
+      padding: 20px;
+      border-radius: 10px;
+      margin: 10px;
+      display: inline-block;
+      width: 250px;
+    }
+
+    input {
+      padding: 12px;
+      width: 250px;
+      border-radius: 6px;
+      border: none;
+      margin-right: 10px;
+    }
+
+    .footer {
+      margin-top: 60px;
+      font-size: 14px;
+      color: #64748b;
+    }
+  </style>
 </head>
 
 <body>
-  <div id="root"></div>
 
-  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <div class="container">
 
-  <script type="text/babel">
+    <h1>Trustera</h1>
+    <p>
+      Workforce Reliability, Compliance & Incident Intelligence Platform
+    </p>
 
-    function App() {
-      return (
-        <div style={{padding: "40px", fontFamily: "Arial"}}>
-          <h1>Trustera</h1>
-          <p>Workforce reliability & incident intelligence platform</p>
+    <button class="btn">Join Waitlist</button>
 
-          <button>Join Waitlist</button>
-        </div>
-      );
-    }
+    <div class="section">
+      <h2>What We Solve</h2>
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+      <div class="card">
+        <h3>No-Shows</h3>
+        <p>Reduce workforce disruption with predictive insights</p>
+      </div>
 
-  </script>
+      <div class="card">
+        <h3>Compliance</h3>
+        <p>Automate Right-to-Work and document tracking</p>
+      </div>
+
+      <div class="card">
+        <h3>Incidents</h3>
+        <p>Capture and triage operational issues in real-time</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Join Early Access</h2>
+
+      <input type="email" placeholder="Enter your email" />
+      <button class="btn">Sign Up</button>
+    </div>
+
+    <div class="footer">
+      Trustera by Jemadi Group Ltd
+    </div>
+
+  </div>
+
 </body>
 </html>
