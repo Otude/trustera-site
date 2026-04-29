@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Trustera</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+
+    function App() {
+      return (
+        <div style={{padding: "40px", fontFamily: "Arial"}}>
+          <h1>Trustera</h1>
+          <p>Workforce reliability & incident intelligence platform</p>
+
+          <button>Join Waitlist</button>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+  </script>
+</body>
+</html>
