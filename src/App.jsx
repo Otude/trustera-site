@@ -241,17 +241,23 @@ export default function TrusteraLandingPage() {
           Be among the first UK businesses modernising workforce compliance, reliability, and operational risk.
         </p>
 
-        <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur p-2 max-w-2xl mx-auto">
-          <iframe
-            src="https://tally.so/embed/XxOEvO?alignLeft=1&hideTitle=1&transparentBackground=1&dynamicHeight=1"
-            width="100%"
-            height="900"
-            frameBorder="0"
-            marginHeight="0"
-            marginWidth="0"
-            title="Trustera Early Access Form"
-            className="rounded-2xl"
-          />
+        <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur p-8 max-w-2xl mx-auto">
+          <h3 className="text-2xl font-bold">Request early access</h3>
+          
+          <p className="mt-3 text-slate-300">
+            Complete a short form so we can understand your workforce, compliance, and incident management needs.
+          </p>
+          
+          <a
+            href="https://tally.so/r/XxOEvO"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-6 bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30 inline-block"
+            
+            >
+            
+            Open Early Access Form
+          </a>
         </div>
 
         <p className="mt-4 text-sm text-slate-500">
