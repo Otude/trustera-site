@@ -246,7 +246,7 @@ export default function TrusteraLandingPage() {
           <iframe
             src="https://tally.so/r/XxOEvO?transparentBackground=1&hideTitle=1"
             width="100%"
-            height="720"
+            height="780"
             frameBorder="0"
             title="Trustera Early Access Form"
             className="rounded-2xl"
