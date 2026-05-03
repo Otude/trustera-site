@@ -246,7 +246,7 @@ export default function TrusteraLandingPage() {
           <iframe
             src="https://tally.so/r/XxOEvO"
             width="100%"
-            height="1000"
+            height="1100"
             frameBorder="0"
             marginHeight="0"
             marginWidth="0"
