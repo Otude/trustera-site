@@ -83,7 +83,7 @@ export default function TrusteraLandingPage() {
           </p>
 
           <h1 className="text-5xl md:text-6xl font-bold leading-tight">
-            Reduce workforce risk. Automate compliance. Resolve incidents faster.
+            Reduce workforce risk. Automate compliance. Control operations in real-time.
           </h1>
 
           <p className="mt-6 text-slate-300 text-lg max-w-xl">
@@ -97,13 +97,7 @@ export default function TrusteraLandingPage() {
               className="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30 inline-block"
             >
               Join Early Access
-            </a>
-
-            <a
-              href="#contact"
-              className="border border-slate-700 hover:border-slate-500 px-6 py-3 rounded-2xl inline-block"
-            >
-              Request Demo
+           
             </a>
           </div>
         </motion.div>
@@ -252,7 +246,7 @@ export default function TrusteraLandingPage() {
           <iframe
             src="https://tally.so/r/XxOEvO"
             width="100%"
-            height="520"
+            height="650"
             frameBorder="0"
             marginHeight="0"
             marginWidth="0"
