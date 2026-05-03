@@ -242,14 +242,12 @@ export default function TrusteraLandingPage() {
           and incident intelligence.
         </p>
 
-        <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900 p-4">
+        <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur p-2 max-w-2xl mx-auto">
           <iframe
-            src="https://tally.so/r/XxOEvO?transparentBackground=1"
+            src="https://tally.so/r/XxOEvO?transparentBackground=1&hideTitle=1"
             width="100%"
-            height="780"
+            height="720"
             frameBorder="0"
-            marginHeight="0"
-            marginWidth="0"
             title="Trustera Early Access Form"
             className="rounded-2xl"
           />
