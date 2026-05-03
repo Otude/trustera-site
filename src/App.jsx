@@ -207,7 +207,7 @@ export default function TrusteraLandingPage() {
                 href="#contact"
                 className="mt-6 w-full bg-blue-600 hover:bg-blue-500 px-4 py-3 rounded-2xl inline-block"
               >
-                Choose Plan
+                Join Early Access
               </a>
             </div>
           ))}
@@ -238,8 +238,7 @@ export default function TrusteraLandingPage() {
         </h2>
 
         <p className="mt-4 text-slate-300">
-          Be among the first UK businesses modernising compliance, workforce trust,
-          and incident intelligence.
+          Be among the first UK businesses modernising workforce compliance, reliability, and operational risk.
         </p>
 
         <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur p-2 max-w-2xl mx-auto">
@@ -248,6 +247,8 @@ export default function TrusteraLandingPage() {
             width="100%"
             height="780"
             frameBorder="0"
+            marginHeight="0"
+            marginWidth="0"
             title="Trustera Early Access Form"
             className="rounded-2xl"
           />
