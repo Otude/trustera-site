@@ -250,7 +250,7 @@ export default function TrusteraLandingPage() {
 
         <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900 p-4">
           <iframe
-            src="PASTE_YOUR_TALLY_FORM_LINK_HERE"
+            src="https://tally.so/r/XxOEvO"
             width="100%"
             height="520"
             frameBorder="0"
