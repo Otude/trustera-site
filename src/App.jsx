@@ -49,26 +49,10 @@ export default function TrusteraLandingPage() {
   ];
 
   const workflow = [
-    [
-      '1',
-      'Add workers',
-      'Create worker records with role, site and employment status.'
-    ],
-    [
-      '2',
-      'Upload documents',
-      'Store right-to-work documents, licences, certifications, DBS checks and training records.'
-    ],
-    [
-      '3',
-      'Monitor expiries',
-      'Trustera tracks document status and flags expired or soon-to-expire records.'
-    ],
-    [
-      '4',
-      'Stay audit-ready',
-      'Use dashboards, alerts, audit logs and reports to maintain compliance visibility.'
-    ]
+    ['1', 'Add workers', 'Create worker records with role, site and employment status.'],
+    ['2', 'Upload documents', 'Store right-to-work documents, licences, certifications, DBS checks and training records.'],
+    ['3', 'Monitor expiries', 'Trustera tracks document status and flags expired or soon-to-expire records.'],
+    ['4', 'Stay audit-ready', 'Use dashboards, alerts, audit logs and reports to maintain compliance visibility.']
   ];
 
   return (
@@ -238,7 +222,7 @@ export default function TrusteraLandingPage() {
             monitored, audit-ready compliance records.
           </p>
 
-          <div className="grid gap-5 md:grid-cols-4 mt-8">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4 mt-8">
             {workflow.map((step, i) => (
               <div
                 key={i}
@@ -333,7 +317,7 @@ export default function TrusteraLandingPage() {
         </div>
       </section>
 
-      <section className="py-16 md:py-20 bg-slate-900/50">
+      <section className="py-16 md:py-20 bg-slate-900/50 overflow-hidden">
         <div className="max-w-6xl mx-auto px-4 md:px-6">
           <h2 className="text-2xl md:text-3xl font-bold">
             Built with security and accountability in mind
@@ -345,7 +329,7 @@ export default function TrusteraLandingPage() {
             activity.
           </p>
 
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mt-8">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mt-8">
             {[
               'Role-based access',
               'Audit logs',
@@ -373,11 +357,11 @@ export default function TrusteraLandingPage() {
           compliance platform.
         </p>
 
-        <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur p-2 max-w-2xl mx-auto">
+        <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur p-2 max-w-2xl mx-auto overflow-hidden">
           <iframe
             src="https://tally.so/embed/XxOEvO?alignLeft=1&hideTitle=1&transparentBackground=1&dynamicHeight=1"
             width="100%"
-            height="780"
+            height="650"
             frameBorder="0"
             marginHeight="0"
             marginWidth="0"
