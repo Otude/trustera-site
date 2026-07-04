@@ -4,7 +4,7 @@ export default function TrusteraLandingPage() {
   const features = [
     'Compliance tracking',
     'Expiry alerts',
-    'Trust scoring',
+    'Compliance health',
     'Incident logs',
     'Attendance intelligence',
     'Audit records',
@@ -28,15 +28,9 @@ export default function TrusteraLandingPage() {
   ];
 
   const plans = [
-    ['Starter', '£99/mo', 'Up to 25 workers'],
-    ['Growth', '£249/mo', 'Up to 100 workers'],
-    ['Enterprise', 'Custom', 'Multi-site operations']
-  ];
-
-  const testimonials = [
-    ['Finally one place for compliance visibility.', 'Operations Manager, Facilities Company'],
-    ['Cuts admin workload dramatically.', 'Compliance Lead, Care Provider'],
-    ['Exactly what shift businesses need.', 'Site Supervisor, Cleaning Contractor']
+    ['Early Access', 'For teams validating workforce compliance workflows'],
+    ['Pilot Programme', 'For growing teams ready to test Trustera with real users'],
+    ['Enterprise', 'For multi-site operations needing tailored onboarding']
   ];
 
   return (
@@ -84,12 +78,13 @@ export default function TrusteraLandingPage() {
           </p>
 
           <h1 className="text-4xl md:text-6xl font-bold leading-tight">
-            Reduce workforce risk. Automate compliance. Control operations in real-time.
+            Reduce workforce risk. Automate compliance. Stay audit-ready.
           </h1>
 
           <p className="mt-5 md:mt-6 text-slate-300 text-base md:text-lg max-w-xl">
-            Trustera helps operations teams track workforce reliability, monitor compliance,
-            and manage incidents in one platform.
+            Trustera helps HR, operations and compliance teams manage workforce documents,
+            monitor licence and certification expiries, maintain audit readiness and automate
+            compliance alerts from a single platform.
           </p>
 
           <div className="mt-8 flex flex-wrap gap-4">
@@ -112,7 +107,7 @@ export default function TrusteraLandingPage() {
             {[
               ['Active Workers', '46'],
               ['Critical Alerts', '2'],
-              ['Avg Trust Score', '84'],
+              ['Compliance Health', '84%'],
               ['Expiring Docs', '3']
             ].map((card, i) => (
               <div key={i} className="bg-slate-800 rounded-2xl p-4">
@@ -137,10 +132,7 @@ export default function TrusteraLandingPage() {
       <section className="max-w-6xl mx-auto px-4 md:px-6 py-8 md:py-10">
         <div className="grid gap-4 md:grid-cols-3">
           {stats.map((s, i) => (
-            <div
-              key={i}
-              className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-center"
-            >
+            <div key={i} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-center">
               <div className="text-3xl font-bold text-blue-300">{s[0]}</div>
               <div className="text-sm text-slate-400 mt-1">{s[1]}</div>
             </div>
@@ -150,15 +142,12 @@ export default function TrusteraLandingPage() {
 
       <section id="features" className="max-w-6xl mx-auto px-4 md:px-6 py-16 md:py-20">
         <h2 className="text-2xl md:text-3xl font-bold">
-          Everything needed to manage workforce trust
+          Everything needed to stay workforce compliant
         </h2>
 
         <div className="grid gap-4 md:gap-5 md:grid-cols-2 lg:grid-cols-4 mt-8">
           {features.map((item, i) => (
-            <div
-              key={i}
-              className="bg-slate-900 hover:bg-slate-800 transition border border-slate-800 rounded-2xl p-5"
-            >
+            <div key={i} className="bg-slate-900 hover:bg-slate-800 transition border border-slate-800 rounded-2xl p-5">
               {item}
             </div>
           ))}
@@ -173,10 +162,7 @@ export default function TrusteraLandingPage() {
 
           <div className="grid gap-4 md:gap-5 md:grid-cols-3 mt-8">
             {sectors.map((item, i) => (
-              <div
-                key={i}
-                className="rounded-2xl border border-slate-800 bg-slate-950 p-5"
-              >
+              <div key={i} className="rounded-2xl border border-slate-800 bg-slate-950 p-5">
                 {item}
               </div>
             ))}
@@ -186,22 +172,18 @@ export default function TrusteraLandingPage() {
 
       <section className="max-w-6xl mx-auto px-4 md:px-6 py-16 md:py-20">
         <h2 className="text-2xl md:text-3xl font-bold text-center">
-          Simple pricing for growing teams
+          Early access options for growing teams
         </h2>
 
         <p className="text-center text-slate-400 mt-3">
-          Designed for operations-heavy businesses managing shift-based teams.
+          Designed for operations-heavy businesses managing regulated, shift-based teams.
         </p>
 
         <div className="grid gap-5 md:grid-cols-3 mt-8 max-w-md mx-auto md:max-w-none">
           {plans.map((p, i) => (
-            <div
-              key={i}
-              className="rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center"
-            >
+            <div key={i} className="rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center">
               <div className="text-xl font-semibold">{p[0]}</div>
-              <div className="text-4xl font-bold mt-4">{p[1]}</div>
-              <div className="text-slate-400 mt-2">{p[2]}</div>
+              <div className="text-slate-400 mt-4 min-h-[48px]">{p[1]}</div>
 
               <a
                 href="#contact"
@@ -216,17 +198,22 @@ export default function TrusteraLandingPage() {
 
       <section className="max-w-6xl mx-auto px-4 md:px-6 py-16 md:py-20">
         <h2 className="text-2xl md:text-3xl font-bold text-center">
-          Trusted by operations leaders
+          Built from real customer discovery
         </h2>
 
+        <p className="max-w-3xl mx-auto text-center text-slate-300 mt-4">
+          Trustera is currently being validated with HR, operations, security, facilities
+          and compliance professionals across the UK.
+        </p>
+
         <div className="grid gap-5 md:grid-cols-3 mt-8">
-          {testimonials.map((item, i) => (
-            <div
-              key={i}
-              className="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-slate-300"
-            >
-              “{item[0]}”
-              <div className="mt-3 text-sm text-slate-500">{item[1]}</div>
+          {[
+            'Workforce compliance data is often spread across multiple systems.',
+            'Spreadsheets are still widely used even where software already exists.',
+            'Operations teams need clearer visibility of expiring documents and audit risk.'
+          ].map((item, i) => (
+            <div key={i} className="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-slate-300">
+              {item}
             </div>
           ))}
         </div>
@@ -238,7 +225,7 @@ export default function TrusteraLandingPage() {
         </h2>
 
         <p className="mt-4 text-slate-300">
-          Be among the first UK businesses modernising workforce compliance, reliability, and operational risk.
+          Be among the first UK businesses modernising workforce compliance, reliability and operational risk.
         </p>
 
         <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur p-2 max-w-2xl mx-auto">
@@ -262,7 +249,7 @@ export default function TrusteraLandingPage() {
       <section className="max-w-6xl mx-auto px-4 md:px-6 pb-16">
         <div className="rounded-3xl border border-slate-800 bg-gradient-to-r from-blue-600/20 to-cyan-500/10 p-8 text-center">
           <h3 className="text-2xl md:text-3xl font-bold">
-            Ready to modernise workforce trust?
+            Ready to modernise workforce compliance?
           </h3>
 
           <p className="text-slate-300 mt-3">
