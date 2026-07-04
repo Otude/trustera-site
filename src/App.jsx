@@ -4,12 +4,12 @@ export default function TrusteraLandingPage() {
   const features = [
     'Compliance tracking',
     'Expiry alerts',
-    'Compliance score',
     'Audit records',
     'Document repository',
     'Compliance reports',
     'Multi-site dashboards',
-    'Role-based access'
+    'Role-based access',
+    'Document history'
   ];
 
   const sectors = [
@@ -22,9 +22,10 @@ export default function TrusteraLandingPage() {
   ];
 
   const benefits = [
-    ['One Platform', 'Centralise workforce compliance documents and expiry visibility.'],
-    ['Automated Alerts', 'Get notified before documents, licences or certificates expire.'],
-    ['Audit-ready', 'Keep records, logs and reports ready for compliance reviews.']
+    ['Never miss an expiry', 'Track licences, right-to-work records and certifications before they become a risk.'],
+    ['Replace manual reminders', 'Move away from spreadsheets, calendar reminders and email chasing.'],
+    ['Stay audit-ready', 'Keep workforce compliance records visible, organised and ready for review.'],
+    ['Manage every site', 'See compliance status across teams, roles and locations from one dashboard.']
   ];
 
   const plans = [
@@ -49,10 +50,10 @@ export default function TrusteraLandingPage() {
   ];
 
   const workflow = [
-    ['1', 'Add workers', 'Create worker records with role, site and employment status.'],
-    ['2', 'Upload documents', 'Store right-to-work documents, licences, certifications, DBS checks and training records.'],
-    ['3', 'Monitor expiries', 'Trustera tracks document status and flags expired or soon-to-expire records.'],
-    ['4', 'Stay audit-ready', 'Use dashboards, alerts, audit logs and reports to maintain compliance visibility.']
+    ['1', '👤', 'Add workers', 'Create worker records with role, site and employment status.'],
+    ['2', '📄', 'Upload documents', 'Store right-to-work documents, licences, certifications, DBS checks and training records.'],
+    ['3', '⏰', 'Monitor expiries', 'Trustera tracks document status and flags expired or soon-to-expire records.'],
+    ['4', '🛡️', 'Stay audit-ready', 'Use dashboards, alerts, audit logs and reports to maintain compliance visibility.']
   ];
 
   return (
@@ -105,10 +106,9 @@ export default function TrusteraLandingPage() {
           </h1>
 
           <p className="mt-5 md:mt-6 text-slate-300 text-base md:text-lg max-w-xl">
-            Trustera helps HR, operations and compliance teams manage workforce
-            documents, automatically monitor licences, certifications and
-            right-to-work expiries, maintain audit readiness and reduce compliance
-            risk from one platform.
+            Trustera automatically tracks workforce compliance documents,
+            licence expiries and certifications — helping HR and operations
+            teams stay compliant without spreadsheets or manual reminders.
           </p>
 
           <div className="mt-8 flex flex-wrap gap-4">
@@ -138,7 +138,7 @@ export default function TrusteraLandingPage() {
             {[
               ['Active Workers', '46'],
               ['Critical Alerts', '2'],
-              ['Compliance Score', '84%'],
+              ['Workers Compliant', '43 / 46'],
               ['Expiring Docs', '3']
             ].map((card, i) => (
               <div key={i} className="bg-slate-800 rounded-2xl p-4">
@@ -148,27 +148,32 @@ export default function TrusteraLandingPage() {
             ))}
           </div>
 
-          <div className="mt-5 h-24 md:h-28 rounded-2xl bg-gradient-to-r from-blue-600/20 to-cyan-400/20 border border-slate-800 flex items-end gap-2 p-3">
-            {[30, 55, 45, 70, 60, 85, 78].map((h, i) => (
-              <div
-                key={i}
-                className="flex-1 bg-blue-500/70 rounded-t-lg"
-                style={{ height: `${h}%` }}
-              />
-            ))}
+          <div className="mt-5 rounded-2xl bg-gradient-to-r from-blue-600/20 to-cyan-400/20 border border-slate-800 p-4">
+            <div className="text-sm text-slate-300 mb-3">
+              Expiring documents — next 30 days
+            </div>
+            <div className="h-24 flex items-end gap-2">
+              {[30, 55, 45, 70, 60, 85, 78].map((h, i) => (
+                <div
+                  key={i}
+                  className="flex-1 bg-blue-500/70 rounded-t-lg"
+                  style={{ height: `${h}%` }}
+                />
+              ))}
+            </div>
           </div>
 
           <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
             <div className="text-sm text-slate-400 mb-3">Compliance alerts</div>
             <div className="space-y-2">
               <div className="rounded-xl bg-red-500/15 border border-red-500/20 px-3 py-2 text-sm text-red-200">
-                Driving Licence expired
+                Driving Licence expired 2 days ago
               </div>
               <div className="rounded-xl bg-amber-500/15 border border-amber-500/20 px-3 py-2 text-sm text-amber-200">
-                British Passport expiring soon
+                SIA Licence expires in 5 days
               </div>
               <div className="rounded-xl bg-emerald-500/15 border border-emerald-500/20 px-3 py-2 text-sm text-emerald-200">
-                BRP valid and monitored
+                Right to Work verified
               </div>
             </div>
           </div>
@@ -176,13 +181,13 @@ export default function TrusteraLandingPage() {
       </section>
 
       <section className="max-w-6xl mx-auto px-4 md:px-6 py-8 md:py-10">
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-4">
           {benefits.map((item, i) => (
             <div
               key={i}
-              className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-center"
+              className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"
             >
-              <div className="text-2xl font-bold text-blue-300">{item[0]}</div>
+              <div className="text-lg font-bold text-blue-300">{item[0]}</div>
               <div className="text-sm text-slate-400 mt-2">{item[1]}</div>
             </div>
           ))}
@@ -228,11 +233,15 @@ export default function TrusteraLandingPage() {
                 key={i}
                 className="rounded-3xl border border-slate-800 bg-slate-950 p-6"
               >
-                <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center font-bold mb-5">
-                  {step[0]}
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center font-bold">
+                    {step[0]}
+                  </div>
+                  <div className="text-2xl">{step[1]}</div>
                 </div>
-                <h3 className="text-lg font-semibold">{step[1]}</h3>
-                <p className="text-sm text-slate-400 mt-3">{step[2]}</p>
+
+                <h3 className="text-lg font-semibold">{step[2]}</h3>
+                <p className="text-sm text-slate-400 mt-3">{step[3]}</p>
               </div>
             ))}
           </div>
@@ -264,7 +273,7 @@ export default function TrusteraLandingPage() {
       <section className="py-16 md:py-20 bg-slate-900/50">
         <div className="max-w-6xl mx-auto px-4 md:px-6">
           <h2 className="text-2xl md:text-3xl font-bold text-center">
-            Validated through customer discovery
+            Built from conversations with UK employers
           </h2>
 
           <p className="max-w-3xl mx-auto text-center text-slate-300 mt-4">
@@ -329,12 +338,13 @@ export default function TrusteraLandingPage() {
             activity.
           </p>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mt-8">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 mt-8">
             {[
               'Role-based access',
               'Audit logs',
               'Secure document workflows',
-              'GDPR-conscious design'
+              'GDPR-conscious design',
+              'Document version history'
             ].map((item, i) => (
               <div
                 key={i}
@@ -357,18 +367,75 @@ export default function TrusteraLandingPage() {
           compliance platform.
         </p>
 
-        <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur p-2 max-w-2xl mx-auto overflow-hidden">
-          <iframe
-            src="https://tally.so/embed/XxOEvO?alignLeft=1&hideTitle=1&transparentBackground=1&dynamicHeight=1"
-            width="100%"
-            height="650"
-            frameBorder="0"
-            marginHeight="0"
-            marginWidth="0"
-            title="Trustera Early Access Form"
-            className="rounded-2xl"
-          />
-        </div>
+        <form className="mt-8 max-w-2xl mx-auto rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur p-6 text-left">
+          <div className="grid gap-5">
+            <div>
+              <label className="block text-sm font-semibold mb-2">Name</label>
+              <input
+                type="text"
+                name="name"
+                className="w-full rounded-xl bg-slate-950 border border-slate-700 px-4 py-3 outline-none focus:border-blue-500"
+                placeholder="Your name"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold mb-2">Company</label>
+              <input
+                type="text"
+                name="company"
+                className="w-full rounded-xl bg-slate-950 border border-slate-700 px-4 py-3 outline-none focus:border-blue-500"
+                placeholder="Company name"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold mb-2">Email</label>
+              <input
+                type="email"
+                name="email"
+                className="w-full rounded-xl bg-slate-950 border border-slate-700 px-4 py-3 outline-none focus:border-blue-500"
+                placeholder="you@company.com"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold mb-2">Industry</label>
+              <select
+                name="industry"
+                className="w-full rounded-xl bg-slate-950 border border-slate-700 px-4 py-3 outline-none focus:border-blue-500"
+              >
+                <option value="">Select industry</option>
+                <option>Security</option>
+                <option>Facilities Management</option>
+                <option>Cleaning</option>
+                <option>Care Homes</option>
+                <option>Hospitality</option>
+                <option>Warehousing</option>
+                <option>Other</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold mb-2">
+                Biggest workforce/compliance challenge?
+              </label>
+              <textarea
+                name="challenge"
+                rows="4"
+                className="w-full rounded-xl bg-slate-950 border border-slate-700 px-4 py-3 outline-none focus:border-blue-500 resize-none"
+                placeholder="Tell us what you currently struggle with..."
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30 font-semibold"
+            >
+              Request Early Access
+            </button>
+          </div>
+        </form>
 
         <p className="mt-4 text-sm text-slate-500">
           Prefer email? Contact hello@jemadi.co.uk
@@ -378,11 +445,11 @@ export default function TrusteraLandingPage() {
       <section className="max-w-6xl mx-auto px-4 md:px-6 pb-16">
         <div className="rounded-3xl border border-slate-800 bg-gradient-to-r from-blue-600/20 to-cyan-500/10 p-8 text-center">
           <h3 className="text-2xl md:text-3xl font-bold">
-            Ready to modernise workforce compliance?
+            Stop chasing compliance documents.
           </h3>
 
           <p className="text-slate-300 mt-3">
-            Join the next generation of compliance-first operators.
+            Start managing workforce compliance from one place.
           </p>
 
           <a
