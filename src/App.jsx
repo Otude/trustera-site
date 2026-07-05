@@ -1,6 +1,25 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 
+const SUPABASE_REST_URL =
+  'https://cgivmvuxrimhutmjdybh.supabase.co/rest/v1/early_access_leads';
+
+const SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNnaXZtdnV4cmltaHV0bWpkeWJoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxODg1MzIsImV4cCI6MjA5NDc2NDUzMn0.3M5olExfyBmovW674TWBxrv3FtF4GyPWB0fnxx33M4w';
+
 export default function TrusteraLandingPage() {
+  const [formData, setFormData] = useState({
+    name: '',
+    company: '',
+    email: '',
+    industry: '',
+    challenge: ''
+  });
+
+  const [submitting, setSubmitting] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
   const features = [
     'Compliance tracking',
     'Expiry alerts',
@@ -56,6 +75,68 @@ export default function TrusteraLandingPage() {
     ['4', '🛡️', 'Stay audit-ready', 'Use dashboards, alerts, audit logs and reports to maintain compliance visibility.']
   ];
 
+  const handleChange = (event) => {
+    const { name, value } = event.target;
+
+    setFormData((previous) => ({
+      ...previous,
+      [name]: value
+    }));
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
+    setSuccessMessage('');
+    setErrorMessage('');
+
+    if (!formData.name || !formData.company || !formData.email || !formData.industry) {
+      setErrorMessage('Please complete all required fields.');
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const response = await fetch(SUPABASE_REST_URL, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal'
+        },
+        body: JSON.stringify({
+          name: formData.name,
+          company: formData.company,
+          email: formData.email,
+          industry: formData.industry,
+          challenge: formData.challenge,
+          status: 'new',
+          source: 'landing-page',
+          contacted: false
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Unable to submit form.');
+      }
+
+      setSuccessMessage('Thank you. Your early access request has been received.');
+      setFormData({
+        name: '',
+        company: '',
+        email: '',
+        industry: '',
+        challenge: ''
+      });
+    } catch (error) {
+      setErrorMessage('Something went wrong. Please try again or email hello@jemadi.co.uk.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans overflow-x-hidden pb-20 md:pb-0">
       <header className="sticky top-0 z-50 backdrop-blur-xl border-b border-slate-800/60 bg-slate-950/75">
@@ -92,14 +173,8 @@ export default function TrusteraLandingPage() {
       <section className="relative max-w-6xl mx-auto px-4 md:px-6 py-16 md:py-24 grid md:grid-cols-2 gap-10 md:gap-12 items-center">
         <div className="absolute inset-0 -z-10 bg-gradient-to-r from-blue-600/10 to-cyan-400/10 blur-3xl" />
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7 }}
-        >
-          <p className="text-blue-400 text-sm mb-3">
-            Built for regulated frontline teams
-          </p>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}>
+          <p className="text-blue-400 text-sm mb-3">Built for regulated frontline teams</p>
 
           <h1 className="text-4xl md:text-6xl font-bold leading-tight">
             Reduce workforce risk. Automate compliance. Stay audit-ready.
@@ -112,17 +187,11 @@ export default function TrusteraLandingPage() {
           </p>
 
           <div className="mt-8 flex flex-wrap gap-4">
-            <a
-              href="#contact"
-              className="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30 inline-block"
-            >
+            <a href="#contact" className="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30 inline-block">
               Join Early Access
             </a>
 
-            <a
-              href="#workflow"
-              className="border border-slate-700 hover:border-slate-500 px-6 py-3 rounded-2xl inline-block"
-            >
+            <a href="#workflow" className="border border-slate-700 hover:border-slate-500 px-6 py-3 rounded-2xl inline-block">
               See How It Works
             </a>
           </div>
@@ -152,19 +221,17 @@ export default function TrusteraLandingPage() {
             <div className="text-sm text-slate-300 mb-3">
               Expiring documents — next 30 days
             </div>
+
             <div className="h-24 flex items-end gap-2">
               {[30, 55, 45, 70, 60, 85, 78].map((h, i) => (
-                <div
-                  key={i}
-                  className="flex-1 bg-blue-500/70 rounded-t-lg"
-                  style={{ height: `${h}%` }}
-                />
+                <div key={i} className="flex-1 bg-blue-500/70 rounded-t-lg" style={{ height: `${h}%` }} />
               ))}
             </div>
           </div>
 
           <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
             <div className="text-sm text-slate-400 mb-3">Compliance alerts</div>
+
             <div className="space-y-2">
               <div className="rounded-xl bg-red-500/15 border border-red-500/20 px-3 py-2 text-sm text-red-200">
                 Driving Licence expired 2 days ago
@@ -183,10 +250,7 @@ export default function TrusteraLandingPage() {
       <section className="max-w-6xl mx-auto px-4 md:px-6 py-8 md:py-10">
         <div className="grid gap-4 md:grid-cols-4">
           {benefits.map((item, i) => (
-            <div
-              key={i}
-              className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"
-            >
+            <div key={i} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
               <div className="text-lg font-bold text-blue-300">{item[0]}</div>
               <div className="text-sm text-slate-400 mt-2">{item[1]}</div>
             </div>
@@ -206,10 +270,7 @@ export default function TrusteraLandingPage() {
 
         <div className="grid gap-4 md:gap-5 md:grid-cols-2 lg:grid-cols-4 mt-8">
           {features.map((item, i) => (
-            <div
-              key={i}
-              className="bg-slate-900 hover:bg-slate-800 transition border border-slate-800 rounded-2xl p-5"
-            >
+            <div key={i} className="bg-slate-900 hover:bg-slate-800 transition border border-slate-800 rounded-2xl p-5">
               {item}
             </div>
           ))}
@@ -218,9 +279,7 @@ export default function TrusteraLandingPage() {
 
       <section id="workflow" className="py-16 md:py-20 bg-slate-900/50">
         <div className="max-w-6xl mx-auto px-4 md:px-6">
-          <h2 className="text-2xl md:text-3xl font-bold">
-            How Trustera works
-          </h2>
+          <h2 className="text-2xl md:text-3xl font-bold">How Trustera works</h2>
 
           <p className="mt-4 text-slate-300 max-w-3xl">
             A simple workflow for turning scattered workforce documents into
@@ -229,10 +288,7 @@ export default function TrusteraLandingPage() {
 
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4 mt-8">
             {workflow.map((step, i) => (
-              <div
-                key={i}
-                className="rounded-3xl border border-slate-800 bg-slate-950 p-6"
-              >
+              <div key={i} className="rounded-3xl border border-slate-800 bg-slate-950 p-6">
                 <div className="flex items-center gap-3 mb-5">
                   <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center font-bold">
                     {step[0]}
@@ -260,10 +316,7 @@ export default function TrusteraLandingPage() {
 
         <div className="grid gap-4 md:gap-5 md:grid-cols-3 mt-8">
           {sectors.map((item, i) => (
-            <div
-              key={i}
-              className="rounded-2xl border border-slate-800 bg-slate-900 p-5"
-            >
+            <div key={i} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
               {item}
             </div>
           ))}
@@ -284,10 +337,7 @@ export default function TrusteraLandingPage() {
 
           <div className="grid gap-5 md:grid-cols-3 mt-8">
             {discoveryInsights.map((item, i) => (
-              <div
-                key={i}
-                className="rounded-2xl border border-slate-800 bg-slate-950 p-5"
-              >
+              <div key={i} className="rounded-2xl border border-slate-800 bg-slate-950 p-5">
                 <h3 className="font-semibold text-white">{item[0]}</h3>
                 <p className="text-sm text-slate-400 mt-3">{item[1]}</p>
               </div>
@@ -308,17 +358,11 @@ export default function TrusteraLandingPage() {
 
         <div className="grid gap-5 md:grid-cols-3 mt-8 max-w-md mx-auto md:max-w-none">
           {plans.map((p, i) => (
-            <div
-              key={i}
-              className="rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center"
-            >
+            <div key={i} className="rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center">
               <div className="text-xl font-semibold">{p[0]}</div>
               <div className="text-slate-400 mt-4 min-h-[48px]">{p[1]}</div>
 
-              <a
-                href="#contact"
-                className="mt-6 w-full bg-blue-600 hover:bg-blue-500 px-4 py-3 rounded-2xl inline-block"
-              >
+              <a href="#contact" className="mt-6 w-full bg-blue-600 hover:bg-blue-500 px-4 py-3 rounded-2xl inline-block">
                 Join Early Access
               </a>
             </div>
@@ -346,10 +390,7 @@ export default function TrusteraLandingPage() {
               'GDPR-conscious design',
               'Document version history'
             ].map((item, i) => (
-              <div
-                key={i}
-                className="rounded-2xl border border-slate-800 bg-slate-950 p-5"
-              >
+              <div key={i} className="rounded-2xl border border-slate-800 bg-slate-950 p-5">
                 {item}
               </div>
             ))}
@@ -367,42 +408,50 @@ export default function TrusteraLandingPage() {
           compliance platform.
         </p>
 
-        <form className="mt-8 max-w-2xl mx-auto rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur p-6 text-left">
+        <form onSubmit={handleSubmit} className="mt-8 max-w-2xl mx-auto rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur p-6 text-left">
           <div className="grid gap-5">
             <div>
-              <label className="block text-sm font-semibold mb-2">Name</label>
+              <label className="block text-sm font-semibold mb-2">Name *</label>
               <input
                 type="text"
                 name="name"
+                value={formData.name}
+                onChange={handleChange}
                 className="w-full rounded-xl bg-slate-950 border border-slate-700 px-4 py-3 outline-none focus:border-blue-500"
                 placeholder="Your name"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-semibold mb-2">Company</label>
+              <label className="block text-sm font-semibold mb-2">Company *</label>
               <input
                 type="text"
                 name="company"
+                value={formData.company}
+                onChange={handleChange}
                 className="w-full rounded-xl bg-slate-950 border border-slate-700 px-4 py-3 outline-none focus:border-blue-500"
                 placeholder="Company name"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-semibold mb-2">Email</label>
+              <label className="block text-sm font-semibold mb-2">Email *</label>
               <input
                 type="email"
                 name="email"
+                value={formData.email}
+                onChange={handleChange}
                 className="w-full rounded-xl bg-slate-950 border border-slate-700 px-4 py-3 outline-none focus:border-blue-500"
                 placeholder="you@company.com"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-semibold mb-2">Industry</label>
+              <label className="block text-sm font-semibold mb-2">Industry *</label>
               <select
                 name="industry"
+                value={formData.industry}
+                onChange={handleChange}
                 className="w-full rounded-xl bg-slate-950 border border-slate-700 px-4 py-3 outline-none focus:border-blue-500"
               >
                 <option value="">Select industry</option>
@@ -422,17 +471,32 @@ export default function TrusteraLandingPage() {
               </label>
               <textarea
                 name="challenge"
+                value={formData.challenge}
+                onChange={handleChange}
                 rows="4"
                 className="w-full rounded-xl bg-slate-950 border border-slate-700 px-4 py-3 outline-none focus:border-blue-500 resize-none"
                 placeholder="Tell us what you currently struggle with..."
               />
             </div>
 
+            {errorMessage && (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                {errorMessage}
+              </div>
+            )}
+
+            {successMessage && (
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                {successMessage}
+              </div>
+            )}
+
             <button
               type="submit"
-              className="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30 font-semibold"
+              disabled={submitting}
+              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30 font-semibold"
             >
-              Request Early Access
+              {submitting ? 'Submitting...' : 'Request Early Access'}
             </button>
           </div>
         </form>
@@ -452,10 +516,7 @@ export default function TrusteraLandingPage() {
             Start managing workforce compliance from one place.
           </p>
 
-          <a
-            href="#contact"
-            className="mt-6 bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30 inline-block"
-          >
+          <a href="#contact" className="mt-6 bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl shadow-lg shadow-blue-600/30 inline-block">
             Join Early Access
           </a>
         </div>
@@ -480,10 +541,7 @@ export default function TrusteraLandingPage() {
       </footer>
 
       <div className="fixed bottom-0 left-0 w-full md:hidden bg-slate-950 border-t border-slate-800 p-3 z-50">
-        <a
-          href="#contact"
-          className="block w-full text-center bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-semibold"
-        >
+        <a href="#contact" className="block w-full text-center bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-semibold">
           Join Early Access
         </a>
       </div>
