@@ -4,6 +4,9 @@ import { motion } from 'framer-motion';
 const SUPABASE_REST_URL =
   'https://cgivmvuxrimhutmjdybh.supabase.co/rest/v1/early_access_leads';
 
+const SUPABASE_FUNCTION_URL =
+  'https://cgivmvuxrimhutmjdybh.supabase.co/functions/v1/notify-early-access';
+
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNnaXZtdnV4cmltaHV0bWpkeWJoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxODg1MzIsImV4cCI6MjA5NDc2NDUzMn0.3M5olExfyBmovW674TWBxrv3FtF4GyPWB0fnxx33M4w';
 
@@ -84,18 +87,38 @@ export default function TrusteraLandingPage() {
     }));
   };
 
+  const isValidEmail = (email) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
 
     setSuccessMessage('');
     setErrorMessage('');
 
-    if (!formData.name || !formData.company || !formData.email || !formData.industry) {
+    if (!formData.name.trim() || !formData.company.trim() || !formData.email.trim() || !formData.industry.trim()) {
       setErrorMessage('Please complete all required fields.');
       return;
     }
 
+    if (!isValidEmail(formData.email)) {
+      setErrorMessage('Please enter a valid email address.');
+      return;
+    }
+
     setSubmitting(true);
+
+    const payload = {
+      name: formData.name.trim(),
+      company: formData.company.trim(),
+      email: formData.email.trim(),
+      industry: formData.industry.trim(),
+      challenge: formData.challenge.trim(),
+      status: 'new',
+      source: 'landing-page',
+      contacted: false
+    };
 
     try {
       const response = await fetch(SUPABASE_REST_URL, {
@@ -106,20 +129,23 @@ export default function TrusteraLandingPage() {
           'Content-Type': 'application/json',
           Prefer: 'return=minimal'
         },
-        body: JSON.stringify({
-          name: formData.name,
-          company: formData.company,
-          email: formData.email,
-          industry: formData.industry,
-          challenge: formData.challenge,
-          status: 'new',
-          source: 'landing-page',
-          contacted: false
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
-        throw new Error('Unable to submit form.');
+        throw new Error('Unable to save lead.');
+      }
+
+      const emailResponse = await fetch(SUPABASE_FUNCTION_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!emailResponse.ok) {
+        console.warn('Lead saved, but email notification failed.');
       }
 
       setSuccessMessage('Thank you. Your early access request has been received.');
