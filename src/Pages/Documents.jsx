@@ -1,14 +1,20 @@
-import { useEffect, useState } from 'react'
-import { supabase } from '../supabase'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 
-export default function Documents() {
+import { supabase } from '../supabase'
+
+const DOCUMENTS_BUCKET = 'documents'
+const EXPIRY_WARNING_DAYS = 30
+
+export default function Documents({ profile }) {
   const [documents, setDocuments] = useState([])
   const [workers, setWorkers] = useState([])
+
   const [selectedWorker, setSelectedWorker] = useState('')
   const [documentType, setDocumentType] = useState('')
   const [expiryDate, setExpiryDate] = useState('')
   const [file, setFile] = useState(null)
+
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
 
@@ -20,153 +26,302 @@ export default function Documents() {
   const [previewDoc, setPreviewDoc] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
 
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
+
+  const companyId = profile?.company_id || null
+
+  const fetchWorkers = useCallback(async () => {
+    if (!companyId) {
+      setWorkers([])
+      return
+    }
+
+    const { data, error } = await supabase
+      .from('workers')
+      .select('id, company_id, full_name, role, site, status')
+      .eq('company_id', companyId)
+      .order('full_name', { ascending: true })
+
+    if (error) {
+      console.error('Unable to load workers:', error)
+      toast.error(error.message || 'Unable to load workers.')
+      return
+    }
+
+    setWorkers(data || [])
+  }, [companyId])
+
+  const fetchDocuments = useCallback(async () => {
+    if (!companyId) {
+      setDocuments([])
+      return
+    }
+
+    const { data, error } = await supabase
+      .from('documents')
+      .select(`
+        id,
+        company_id,
+        worker_id,
+        document_type,
+        expiry_date,
+        status,
+        file_path,
+        file_url,
+        created_at,
+        workers (
+          id,
+          company_id,
+          full_name,
+          role,
+          site
+        )
+      `)
+      .eq('company_id', companyId)
+      .order('expiry_date', { ascending: true })
+
+    if (error) {
+      console.error('Unable to load documents:', error)
+      toast.error(error.message || 'Unable to load documents.')
+      return
+    }
+
+    const normalisedDocuments = (data || []).map((document) => {
+      const status = calculateStatus(document.expiry_date)
+
+      return {
+        ...document,
+        status,
+        expiringSoon: isExpiringSoon(document.expiry_date),
+      }
+    })
+
+    setDocuments(normalisedDocuments)
+  }, [companyId])
+
   useEffect(() => {
-    fetchWorkers()
-    fetchDocuments()
-  }, [])
+    let active = true
+
+    async function loadPage() {
+      if (!companyId) {
+        setLoading(false)
+        return
+      }
+
+      setLoading(true)
+
+      try {
+        await Promise.all([fetchWorkers(), fetchDocuments()])
+      } finally {
+        if (active) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadPage()
+
+    return () => {
+      active = false
+    }
+  }, [companyId, fetchWorkers, fetchDocuments])
+
+  function requireCompanyId() {
+    if (!companyId) {
+      throw new Error('Your profile is not assigned to a company.')
+    }
+
+    return companyId
+  }
 
   function calculateStatus(date) {
-    const today = new Date()
-    const expiry = new Date(date)
+    if (!date) return 'valid'
 
-    today.setHours(0, 0, 0, 0)
-    expiry.setHours(0, 0, 0, 0)
+    const daysLeft = getDaysUntilExpiry(date)
 
-    const daysLeft = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24))
-
-    if (daysLeft < 0) return 'expired'
-    return 'valid'
+    return daysLeft < 0 ? 'expired' : 'valid'
   }
 
   function isExpiringSoon(date) {
+    if (!date) return false
+
+    const daysLeft = getDaysUntilExpiry(date)
+
+    return daysLeft >= 0 && daysLeft <= EXPIRY_WARNING_DAYS
+  }
+
+  function getDaysUntilExpiry(date) {
     const today = new Date()
-    const expiry = new Date(date)
+    const expiry = new Date(`${date}T00:00:00`)
 
     today.setHours(0, 0, 0, 0)
     expiry.setHours(0, 0, 0, 0)
 
-    const daysLeft = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24))
+    return Math.ceil(
+      (expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+    )
+  }
 
-    return daysLeft >= 0 && daysLeft <= 30
+  function sanitiseFileName(fileName) {
+    return fileName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/-+/g, '-')
+  }
+
+  function createStoragePath({ workerId, selectedFile }) {
+    const safeName = sanitiseFileName(selectedFile.name)
+    const uniqueName = `${Date.now()}-${crypto.randomUUID()}-${safeName}`
+
+    return `${companyId}/${workerId}/${uniqueName}`
   }
 
   async function createAuditLog({
-    companyId,
     action,
     entityType,
     entityId,
     entityName,
     details,
   }) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const currentCompanyId = requireCompanyId()
 
-    await supabase.from('audit_logs').insert([
-      {
-        company_id: companyId || null,
-        user_id: user?.id || null,
-        user_email: user?.email || null,
-        action,
-        entity_type: entityType,
-        entity_id: entityId || null,
-        entity_name: entityName || null,
-        details,
-      },
-    ])
-  }
+    if (!profile?.id) {
+      throw new Error('Your user profile could not be identified.')
+    }
 
-  async function fetchWorkers() {
-    const { data, error } = await supabase
-      .from('workers')
-      .select('*')
-      .order('full_name')
+    const auditRecord = {
+      company_id: currentCompanyId,
+      user_id: profile.id,
+      user_email: profile.email || null,
+      action,
+      entity_type: entityType || null,
+      entity_id: entityId || null,
+      entity_name: entityName || null,
+      details:
+        typeof details === 'string'
+          ? details
+          : details
+            ? JSON.stringify(details)
+            : null,
+    }
+
+    const { error } = await supabase
+      .from('audit_logs')
+      .insert([auditRecord])
 
     if (error) {
-      toast.error(error.message)
-      return
+      console.error('Unable to create audit log:', error)
+      throw error
     }
-
-    setWorkers(data || [])
   }
 
-  async function fetchDocuments() {
-    const { data, error } = await supabase
-      .from('documents')
-      .select(`
-        *,
-        workers (
-          full_name,
-          role,
-          site
-        )
-      `)
-      .order('expiry_date', { ascending: true })
+  async function uploadDocument(event) {
+    event.preventDefault()
 
-    if (error) {
-      toast.error(error.message)
-      return
-    }
+    if (submitting) return
 
-    const updatedDocs = (data || []).map((doc) => ({
-      ...doc,
-      status: calculateStatus(doc.expiry_date),
-      expiringSoon: isExpiringSoon(doc.expiry_date),
-    }))
-
-    setDocuments(updatedDocs)
-  }
-
-  async function uploadDocument(e) {
-    e.preventDefault()
-
-    if (!selectedWorker || !documentType || !expiryDate || !file) {
-      toast.error('Please complete all fields.')
-      return
-    }
+    let uploadedFilePath = null
 
     try {
+      const currentCompanyId = requireCompanyId()
+      const trimmedDocumentType = documentType.trim()
+
+      if (!selectedWorker) {
+        throw new Error('Please select a worker.')
+      }
+
+      if (!trimmedDocumentType) {
+        throw new Error('Please enter a document type.')
+      }
+
+      if (!expiryDate) {
+        throw new Error('Please select an expiry date.')
+      }
+
+      if (!file) {
+        throw new Error('Please select a file.')
+      }
+
       const selectedWorkerData = workers.find(
-        (worker) => worker.id === selectedWorker
+        (worker) =>
+          worker.id === selectedWorker &&
+          worker.company_id === currentCompanyId,
       )
 
-      const fileExt = file.name.split('.').pop()
-      const fileName = `${Date.now()}.${fileExt}`
-      const filePath = `${selectedWorker}/${fileName}`
+      if (!selectedWorkerData) {
+        throw new Error(
+          'The selected worker is invalid or belongs to another company.',
+        )
+      }
+
+      setSubmitting(true)
+
+      uploadedFilePath = createStoragePath({
+        workerId: selectedWorkerData.id,
+        selectedFile: file,
+      })
 
       const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(filePath, file)
+        .from(DOCUMENTS_BUCKET)
+        .upload(uploadedFilePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: file.type || undefined,
+        })
 
-      if (uploadError) throw uploadError
+      if (uploadError) {
+        throw uploadError
+      }
 
-      const { data: newDoc, error: dbError } = await supabase
+      const documentRecord = {
+        company_id: currentCompanyId,
+        worker_id: selectedWorkerData.id,
+        document_type: trimmedDocumentType,
+        expiry_date: expiryDate,
+        file_path: uploadedFilePath,
+        status: calculateStatus(expiryDate),
+      }
+
+      const { data: newDocument, error: insertError } = await supabase
         .from('documents')
-        .insert([
-          {
-            worker_id: selectedWorker,
-            company_id: selectedWorkerData?.company_id,
-            document_type: documentType,
-            expiry_date: expiryDate,
-            file_path: filePath,
-            status: calculateStatus(expiryDate),
-          },
-        ])
-        .select()
+        .insert([documentRecord])
+        .select(
+          'id, company_id, worker_id, document_type, expiry_date, status, file_path',
+        )
         .single()
 
-      if (dbError) throw dbError
+      if (insertError) {
+        throw insertError
+      }
 
-      await createAuditLog({
-        companyId: selectedWorkerData?.company_id,
-        action: 'document_uploaded',
-        entityType: 'document',
-        entityId: newDoc.id,
-        entityName: documentType,
-        details: `${documentType} uploaded for ${
-          selectedWorkerData?.full_name || 'Unknown worker'
-        }. Expiry date: ${expiryDate}.`,
-      })
+      try {
+        await createAuditLog({
+          action: 'document_uploaded',
+          entityType: 'document',
+          entityId: newDocument.id,
+          entityName: newDocument.document_type,
+          details: {
+            worker_id: selectedWorkerData.id,
+            worker_name: selectedWorkerData.full_name,
+            document_type: newDocument.document_type,
+            expiry_date: newDocument.expiry_date,
+            file_path: newDocument.file_path,
+          },
+        })
+      } catch (auditError) {
+        console.error(
+          'Document was uploaded, but its audit log failed:',
+          auditError,
+        )
+
+        toast.error(
+          'Document uploaded, but the audit entry could not be recorded.',
+        )
+      }
 
       toast.success('Document uploaded successfully.')
 
@@ -175,110 +330,243 @@ export default function Documents() {
       setExpiryDate('')
       setFile(null)
 
-      fetchDocuments()
+      const fileInput = event.currentTarget.querySelector(
+        'input[type="file"]',
+      )
+
+      if (fileInput) {
+        fileInput.value = ''
+      }
+
+      await fetchDocuments()
     } catch (error) {
-      toast.error(error.message)
+      console.error('Document upload failed:', error)
+
+      if (uploadedFilePath) {
+        const { error: cleanupError } = await supabase.storage
+          .from(DOCUMENTS_BUCKET)
+          .remove([uploadedFilePath])
+
+        if (cleanupError) {
+          console.error(
+            'Unable to remove file after failed database insert:',
+            cleanupError,
+          )
+        }
+      }
+
+      toast.error(error?.message || 'Unable to upload the document.')
+    } finally {
+      setSubmitting(false)
     }
   }
 
-  function startEdit(doc) {
-    setEditingDoc(doc)
-    setEditDocumentType(doc.document_type || '')
-    setEditExpiryDate(doc.expiry_date || '')
+  function startEdit(document) {
+    if (document.company_id !== companyId) {
+      toast.error('You cannot edit another company’s document.')
+      return
+    }
+
+    setEditingDoc(document)
+    setEditDocumentType(document.document_type || '')
+    setEditExpiryDate(document.expiry_date || '')
     setEditFile(null)
   }
 
-  async function saveEdit(e) {
-    e.preventDefault()
+  function closeEditModal() {
+    if (savingEdit) return
 
-    if (!editingDoc) return
+    setEditingDoc(null)
+    setEditDocumentType('')
+    setEditExpiryDate('')
+    setEditFile(null)
+  }
+
+  async function saveEdit(event) {
+    event.preventDefault()
+
+    if (!editingDoc || savingEdit) return
+
+    let replacementFilePath = null
+    let databaseUpdated = false
 
     try {
-      let updatedFilePath = editingDoc.file_path
-      const oldDocumentType = editingDoc.document_type
-      const oldExpiryDate = editingDoc.expiry_date
+      const currentCompanyId = requireCompanyId()
+      const trimmedDocumentType = editDocumentType.trim()
 
-      if (editFile) {
-        const fileExt = editFile.name.split('.').pop()
-        const fileName = `${Date.now()}.${fileExt}`
-        const filePath = `${editingDoc.worker_id}/${fileName}`
-
-        const { error: uploadError } = await supabase.storage
-          .from('documents')
-          .upload(filePath, editFile)
-
-        if (uploadError) throw uploadError
-
-        if (editingDoc.file_path) {
-          const { error: removeError } = await supabase.storage
-            .from('documents')
-            .remove([editingDoc.file_path])
-
-          if (removeError) throw removeError
-        }
-
-        updatedFilePath = filePath
+      if (editingDoc.company_id !== currentCompanyId) {
+        throw new Error('You cannot edit another company’s document.')
       }
 
-      const { error } = await supabase
-        .from('documents')
-        .update({
-          document_type: editDocumentType,
-          expiry_date: editExpiryDate,
-          status: calculateStatus(editExpiryDate),
-          file_path: updatedFilePath,
+      if (!trimmedDocumentType) {
+        throw new Error('Document type is required.')
+      }
+
+      if (!editExpiryDate) {
+        throw new Error('Expiry date is required.')
+      }
+
+      setSavingEdit(true)
+
+      const previousDocumentType = editingDoc.document_type
+      const previousExpiryDate = editingDoc.expiry_date
+      const previousFilePath = editingDoc.file_path || null
+
+      let nextFilePath = previousFilePath
+
+      if (editFile) {
+        replacementFilePath = createStoragePath({
+          workerId: editingDoc.worker_id,
+          selectedFile: editFile,
         })
+
+        const { error: uploadError } = await supabase.storage
+          .from(DOCUMENTS_BUCKET)
+          .upload(replacementFilePath, editFile, {
+            cacheControl: '3600',
+            upsert: false,
+            contentType: editFile.type || undefined,
+          })
+
+        if (uploadError) {
+          throw uploadError
+        }
+
+        nextFilePath = replacementFilePath
+      }
+
+      const updatePayload = {
+        document_type: trimmedDocumentType,
+        expiry_date: editExpiryDate,
+        status: calculateStatus(editExpiryDate),
+        file_path: nextFilePath,
+      }
+
+      const { data: updatedDocument, error: updateError } = await supabase
+        .from('documents')
+        .update(updatePayload)
         .eq('id', editingDoc.id)
+        .eq('company_id', currentCompanyId)
+        .select(
+          'id, company_id, worker_id, document_type, expiry_date, status, file_path',
+        )
+        .single()
 
-      if (error) throw error
+      if (updateError) {
+        throw updateError
+      }
 
-      await createAuditLog({
-        companyId: editingDoc.company_id,
-        action: 'document_updated',
-        entityType: 'document',
-        entityId: editingDoc.id,
-        entityName: editDocumentType,
-        details: `Document updated from "${oldDocumentType}" / ${oldExpiryDate} to "${editDocumentType}" / ${editExpiryDate}.${
-          editFile ? ' File was replaced.' : ''
-        }`,
-      })
+      databaseUpdated = true
+
+      if (
+        editFile &&
+        previousFilePath &&
+        previousFilePath !== replacementFilePath
+      ) {
+        const { error: removeError } = await supabase.storage
+          .from(DOCUMENTS_BUCKET)
+          .remove([previousFilePath])
+
+        if (removeError) {
+          console.error(
+            'Document updated, but old file removal failed:',
+            removeError,
+          )
+
+          toast.error(
+            'Document updated, but the previous file could not be removed.',
+          )
+        }
+      }
+
+      try {
+        await createAuditLog({
+          action: 'document_updated',
+          entityType: 'document',
+          entityId: updatedDocument.id,
+          entityName: updatedDocument.document_type,
+          details: {
+            previous_document_type: previousDocumentType,
+            new_document_type: updatedDocument.document_type,
+            previous_expiry_date: previousExpiryDate,
+            new_expiry_date: updatedDocument.expiry_date,
+            file_replaced: Boolean(editFile),
+          },
+        })
+      } catch (auditError) {
+        console.error(
+          'Document was updated, but its audit log failed:',
+          auditError,
+        )
+
+        toast.error(
+          'Document updated, but the audit entry could not be recorded.',
+        )
+      }
 
       toast.success('Document updated successfully.')
 
-      setEditingDoc(null)
-      setEditDocumentType('')
-      setEditExpiryDate('')
-      setEditFile(null)
-
-      fetchDocuments()
+      closeEditModal()
+      await fetchDocuments()
     } catch (error) {
-      toast.error(error.message)
+      console.error('Document update failed:', error)
+
+      if (replacementFilePath && !databaseUpdated) {
+        const { error: cleanupError } = await supabase.storage
+          .from(DOCUMENTS_BUCKET)
+          .remove([replacementFilePath])
+
+        if (cleanupError) {
+          console.error(
+            'Unable to remove replacement file after failed update:',
+            cleanupError,
+          )
+        }
+      }
+
+      toast.error(error?.message || 'Unable to update the document.')
+    } finally {
+      setSavingEdit(false)
     }
   }
 
-  async function openDocument(doc) {
-    if (doc.file_path) {
-      const { data, error } = await supabase.storage
-        .from('documents')
-        .createSignedUrl(doc.file_path, 300)
+  async function openDocument(document) {
+    try {
+      const currentCompanyId = requireCompanyId()
 
-      if (error) {
-        toast.error(error.message)
+      if (document.company_id !== currentCompanyId) {
+        throw new Error('You cannot access another company’s document.')
+      }
+
+      if (document.file_path) {
+        const { data, error } = await supabase.storage
+          .from(DOCUMENTS_BUCKET)
+          .createSignedUrl(document.file_path, 300)
+
+        if (error) {
+          throw error
+        }
+
+        if (!data?.signedUrl) {
+          throw new Error('A secure preview link could not be generated.')
+        }
+
+        setPreviewDoc(document)
+        setPreviewUrl(data.signedUrl)
         return
       }
 
-      setPreviewDoc(doc)
-      setPreviewUrl(data.signedUrl)
-      return
-    }
+      if (document.file_url) {
+        setPreviewDoc(document)
+        setPreviewUrl(document.file_url)
+        return
+      }
 
-    if (doc.file_url) {
-      setPreviewDoc(doc)
-      setPreviewUrl(doc.file_url)
-      return
+      throw new Error('No file was found for this document.')
+    } catch (error) {
+      console.error('Unable to open document:', error)
+      toast.error(error?.message || 'Unable to open the document.')
     }
-
-    toast.error('No file found.')
   }
 
   function closePreview() {
@@ -286,42 +574,92 @@ export default function Documents() {
     setPreviewUrl('')
   }
 
-  async function deleteDocument(doc) {
+  async function deleteDocument(document) {
+    if (deletingId) return
+
     const confirmed = window.confirm(
-      'Are you sure you want to delete this document?'
+      `Delete "${document.document_type}" permanently?`,
     )
 
     if (!confirmed) return
 
     try {
-      if (doc.file_path) {
-        const { error: storageError } = await supabase.storage
-          .from('documents')
-          .remove([doc.file_path])
+      const currentCompanyId = requireCompanyId()
 
-        if (storageError) throw storageError
+      if (document.company_id !== currentCompanyId) {
+        throw new Error('You cannot delete another company’s document.')
       }
 
-      const { error: dbError } = await supabase
+      setDeletingId(document.id)
+
+      /*
+       * Delete the database row first.
+       *
+       * This avoids deleting the file when RLS or another database rule blocks
+       * the row deletion. After the row is deleted, the storage file is removed.
+       */
+      const { data: deletedDocument, error: deleteError } = await supabase
         .from('documents')
         .delete()
-        .eq('id', doc.id)
+        .eq('id', document.id)
+        .eq('company_id', currentCompanyId)
+        .select(
+          'id, company_id, worker_id, document_type, expiry_date, file_path',
+        )
+        .single()
 
-      if (dbError) throw dbError
+      if (deleteError) {
+        throw deleteError
+      }
 
-      await createAuditLog({
-        companyId: doc.company_id,
-        action: 'document_deleted',
-        entityType: 'document',
-        entityId: doc.id,
-        entityName: doc.document_type,
-        details: `${doc.document_type} was deleted. Expiry date was ${doc.expiry_date}.`,
-      })
+      if (deletedDocument.file_path) {
+        const { error: storageError } = await supabase.storage
+          .from(DOCUMENTS_BUCKET)
+          .remove([deletedDocument.file_path])
+
+        if (storageError) {
+          console.error(
+            'Database row deleted, but storage cleanup failed:',
+            storageError,
+          )
+
+          toast.error(
+            'Document record deleted, but its stored file could not be removed.',
+          )
+        }
+      }
+
+      try {
+        await createAuditLog({
+          action: 'document_deleted',
+          entityType: 'document',
+          entityId: deletedDocument.id,
+          entityName: deletedDocument.document_type,
+          details: {
+            worker_id: deletedDocument.worker_id,
+            document_type: deletedDocument.document_type,
+            expiry_date: deletedDocument.expiry_date,
+            file_path: deletedDocument.file_path,
+          },
+        })
+      } catch (auditError) {
+        console.error(
+          'Document was deleted, but its audit log failed:',
+          auditError,
+        )
+
+        toast.error(
+          'Document deleted, but the audit entry could not be recorded.',
+        )
+      }
 
       toast.success('Document deleted successfully.')
-      fetchDocuments()
+      await fetchDocuments()
     } catch (error) {
-      toast.error(error.message)
+      console.error('Document deletion failed:', error)
+      toast.error(error?.message || 'Unable to delete the document.')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -339,20 +677,36 @@ export default function Documents() {
     }
   }
 
-  const filteredDocuments = documents.filter((doc) => {
-    const searchTerm = search.toLowerCase()
+  const filteredDocuments = useMemo(() => {
+    const searchTerm = search.trim().toLowerCase()
 
-    const matchesSearch =
-      doc.workers?.full_name?.toLowerCase().includes(searchTerm) ||
-      doc.document_type?.toLowerCase().includes(searchTerm) ||
-      doc.workers?.role?.toLowerCase().includes(searchTerm) ||
-      doc.workers?.site?.toLowerCase().includes(searchTerm)
+    return documents.filter((document) => {
+      const matchesSearch =
+        !searchTerm ||
+        document.workers?.full_name
+          ?.toLowerCase()
+          .includes(searchTerm) ||
+        document.document_type?.toLowerCase().includes(searchTerm) ||
+        document.workers?.role?.toLowerCase().includes(searchTerm) ||
+        document.workers?.site?.toLowerCase().includes(searchTerm)
 
-    const matchesStatus =
-      statusFilter === 'all' || doc.status === statusFilter
+      const matchesStatus =
+        statusFilter === 'all' || document.status === statusFilter
 
-    return matchesSearch && matchesStatus
-  })
+      return matchesSearch && matchesStatus
+    })
+  }, [documents, search, statusFilter])
+
+  if (!companyId) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.errorPanel}>
+          Your account is not assigned to a company. Sign out and contact an
+          administrator.
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={styles.page}>
@@ -361,8 +715,10 @@ export default function Documents() {
       <form onSubmit={uploadDocument} style={styles.form}>
         <select
           value={selectedWorker}
-          onChange={(e) => setSelectedWorker(e.target.value)}
+          onChange={(event) => setSelectedWorker(event.target.value)}
           style={styles.input}
+          disabled={submitting}
+          required
         >
           <option value="">Select Worker</option>
 
@@ -377,25 +733,38 @@ export default function Documents() {
           type="text"
           placeholder="Document Type"
           value={documentType}
-          onChange={(e) => setDocumentType(e.target.value)}
+          onChange={(event) => setDocumentType(event.target.value)}
           style={styles.input}
+          disabled={submitting}
+          required
         />
 
         <input
           type="date"
           value={expiryDate}
-          onChange={(e) => setExpiryDate(e.target.value)}
+          onChange={(event) => setExpiryDate(event.target.value)}
           style={styles.input}
+          disabled={submitting}
+          required
         />
 
         <input
           type="file"
-          onChange={(e) => setFile(e.target.files[0])}
+          onChange={(event) => setFile(event.target.files?.[0] || null)}
           style={styles.input}
+          disabled={submitting}
+          required
         />
 
-        <button type="submit" style={styles.button}>
-          Upload Document
+        <button
+          type="submit"
+          style={{
+            ...styles.button,
+            ...(submitting ? styles.disabledButton : {}),
+          }}
+          disabled={submitting}
+        >
+          {submitting ? 'Uploading...' : 'Upload Document'}
         </button>
       </form>
 
@@ -407,13 +776,13 @@ export default function Documents() {
             type="text"
             placeholder="Search by worker, document, role, or site..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(event) => setSearch(event.target.value)}
             style={styles.search}
           />
 
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(event) => setStatusFilter(event.target.value)}
             style={styles.filter}
           >
             <option value="all">All Statuses</option>
@@ -422,77 +791,117 @@ export default function Documents() {
           </select>
         </div>
 
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>Worker</th>
-              <th style={styles.th}>Role</th>
-              <th style={styles.th}>Site</th>
-              <th style={styles.th}>Document</th>
-              <th style={styles.th}>Expiry Date</th>
-              <th style={styles.th}>Status</th>
-              <th style={styles.th}>Warning</th>
-              <th style={styles.th}>File</th>
-              <th style={styles.th}>Action</th>
-            </tr>
-          </thead>
+        {loading ? (
+          <div style={styles.emptyState}>Loading documents...</div>
+        ) : filteredDocuments.length === 0 ? (
+          <div style={styles.emptyState}>
+            No documents match the selected filters.
+          </div>
+        ) : (
+          <div style={styles.tableWrapper}>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={styles.th}>Worker</th>
+                  <th style={styles.th}>Role</th>
+                  <th style={styles.th}>Site</th>
+                  <th style={styles.th}>Document</th>
+                  <th style={styles.th}>Expiry Date</th>
+                  <th style={styles.th}>Status</th>
+                  <th style={styles.th}>Warning</th>
+                  <th style={styles.th}>File</th>
+                  <th style={styles.th}>Action</th>
+                </tr>
+              </thead>
 
-          <tbody>
-            {filteredDocuments.map((doc) => (
-              <tr key={doc.id}>
-                <td style={styles.td}>{doc.workers?.full_name || '-'}</td>
-                <td style={styles.td}>{doc.workers?.role || '-'}</td>
-                <td style={styles.td}>{doc.workers?.site || '-'}</td>
-                <td style={styles.td}>{doc.document_type}</td>
-                <td style={styles.td}>{doc.expiry_date}</td>
+              <tbody>
+                {filteredDocuments.map((document) => (
+                  <tr key={document.id}>
+                    <td style={styles.td}>
+                      {document.workers?.full_name || '-'}
+                    </td>
 
-                <td style={styles.td}>
-                  <span
-                    style={{
-                      ...styles.badge,
-                      ...getStatusStyle(doc.status),
-                    }}
-                  >
-                    {doc.status}
-                  </span>
-                </td>
+                    <td style={styles.td}>
+                      {document.workers?.role || '-'}
+                    </td>
 
-                <td style={styles.td}>
-                  {doc.expiringSoon ? (
-                    <span style={styles.warningBadge}>expiring soon</span>
-                  ) : (
-                    '-'
-                  )}
-                </td>
+                    <td style={styles.td}>
+                      {document.workers?.site || '-'}
+                    </td>
 
-                <td style={styles.td}>
-                  <button
-                    onClick={() => openDocument(doc)}
-                    style={styles.linkButton}
-                  >
-                    View
-                  </button>
-                </td>
+                    <td style={styles.td}>
+                      {document.document_type}
+                    </td>
 
-                <td style={styles.td}>
-                  <button
-                    onClick={() => startEdit(doc)}
-                    style={styles.editButton}
-                  >
-                    Edit
-                  </button>
+                    <td style={styles.td}>
+                      {document.expiry_date || '-'}
+                    </td>
 
-                  <button
-                    onClick={() => deleteDocument(doc)}
-                    style={styles.deleteButton}
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    <td style={styles.td}>
+                      <span
+                        style={{
+                          ...styles.badge,
+                          ...getStatusStyle(document.status),
+                        }}
+                      >
+                        {document.status}
+                      </span>
+                    </td>
+
+                    <td style={styles.td}>
+                      {document.expiringSoon ? (
+                        <span style={styles.warningBadge}>
+                          expiring soon
+                        </span>
+                      ) : (
+                        '-'
+                      )}
+                    </td>
+
+                    <td style={styles.td}>
+                      <button
+                        type="button"
+                        onClick={() => openDocument(document)}
+                        style={styles.linkButton}
+                      >
+                        View
+                      </button>
+                    </td>
+
+                    <td style={styles.td}>
+                      <div style={styles.actionButtons}>
+                        <button
+                          type="button"
+                          onClick={() => startEdit(document)}
+                          style={styles.editButton}
+                          disabled={deletingId === document.id}
+                        >
+                          Edit
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => deleteDocument(document)}
+                          style={{
+                            ...styles.deleteButton,
+                            ...(deletingId === document.id
+                              ? styles.disabledButton
+                              : {}),
+                          }}
+                          disabled={deletingId === document.id}
+                        >
+                          {deletingId === document.id
+                            ? 'Deleting...'
+                            : 'Delete'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {editingDoc && (
@@ -500,44 +909,60 @@ export default function Documents() {
           <div style={styles.modal}>
             <h2>Edit Document</h2>
 
-            <form onSubmit={saveEdit}>
+            <form onSubmit={saveEdit} style={styles.modalForm}>
               <input
                 type="text"
                 value={editDocumentType}
-                onChange={(e) => setEditDocumentType(e.target.value)}
+                onChange={(event) =>
+                  setEditDocumentType(event.target.value)
+                }
                 placeholder="Document Type"
                 required
+                disabled={savingEdit}
                 style={styles.input}
               />
 
               <input
                 type="date"
                 value={editExpiryDate}
-                onChange={(e) => setEditExpiryDate(e.target.value)}
+                onChange={(event) =>
+                  setEditExpiryDate(event.target.value)
+                }
                 required
+                disabled={savingEdit}
                 style={styles.input}
               />
 
               <input
                 type="file"
-                onChange={(e) => setEditFile(e.target.files[0])}
+                onChange={(event) =>
+                  setEditFile(event.target.files?.[0] || null)
+                }
+                disabled={savingEdit}
                 style={styles.input}
               />
 
               <p style={styles.helperText}>
-                Leave file empty if you only want to update document type or
-                expiry date.
+                Leave the file field empty to keep the existing file.
               </p>
 
               <div style={styles.modalButtons}>
-                <button type="submit" style={styles.button}>
-                  Save Changes
+                <button
+                  type="submit"
+                  style={{
+                    ...styles.button,
+                    ...(savingEdit ? styles.disabledButton : {}),
+                  }}
+                  disabled={savingEdit}
+                >
+                  {savingEdit ? 'Saving...' : 'Save Changes'}
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setEditingDoc(null)}
+                  onClick={closeEditModal}
                   style={styles.cancelButton}
+                  disabled={savingEdit}
                 >
                   Cancel
                 </button>
@@ -555,19 +980,24 @@ export default function Documents() {
                 <h2 style={styles.previewTitle}>
                   {previewDoc.document_type || 'Document Preview'}
                 </h2>
+
                 <p style={styles.previewSubText}>
                   Expiry: {previewDoc.expiry_date || '-'}
                 </p>
               </div>
 
-              <button onClick={closePreview} style={styles.closeButton}>
+              <button
+                type="button"
+                onClick={closePreview}
+                style={styles.closeButton}
+              >
                 Close
               </button>
             </div>
 
             <iframe
               src={previewUrl}
-              title="Document Preview"
+              title={`${previewDoc.document_type || 'Document'} preview`}
               style={styles.previewFrame}
             />
           </div>
@@ -582,10 +1012,11 @@ const styles = {
     padding: '32px',
     minHeight: '100vh',
     background: '#020617',
-    color: 'white',
+    color: '#ffffff',
   },
 
   heading: {
+    marginTop: 0,
     marginBottom: '20px',
   },
 
@@ -597,12 +1028,20 @@ const styles = {
     marginBottom: '50px',
   },
 
+  modalForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+  },
+
   input: {
+    width: '100%',
+    boxSizing: 'border-box',
     padding: '16px',
     borderRadius: '10px',
     border: '1px solid #334155',
     background: '#1e293b',
-    color: 'white',
+    color: '#ffffff',
   },
 
   button: {
@@ -610,10 +1049,15 @@ const styles = {
     border: 'none',
     borderRadius: '10px',
     background: '#2563eb',
-    color: 'white',
+    color: '#ffffff',
     fontWeight: 'bold',
     cursor: 'pointer',
     flex: 1,
+  },
+
+  disabledButton: {
+    cursor: 'not-allowed',
+    opacity: 0.65,
   },
 
   cancelButton: {
@@ -621,7 +1065,7 @@ const styles = {
     border: 'none',
     borderRadius: '10px',
     background: '#475569',
-    color: 'white',
+    color: '#ffffff',
     fontWeight: 'bold',
     cursor: 'pointer',
     flex: 1,
@@ -635,15 +1079,17 @@ const styles = {
     display: 'flex',
     gap: '16px',
     marginBottom: '20px',
+    flexWrap: 'wrap',
   },
 
   search: {
+    minWidth: '260px',
     flex: 1,
     padding: '14px',
     borderRadius: '10px',
     border: '1px solid #334155',
     background: '#1e293b',
-    color: 'white',
+    color: '#ffffff',
   },
 
   filter: {
@@ -651,11 +1097,17 @@ const styles = {
     borderRadius: '10px',
     border: '1px solid #334155',
     background: '#1e293b',
-    color: 'white',
+    color: '#ffffff',
+  },
+
+  tableWrapper: {
+    width: '100%',
+    overflowX: 'auto',
   },
 
   table: {
     width: '100%',
+    minWidth: '1050px',
     borderCollapse: 'collapse',
   },
 
@@ -664,21 +1116,26 @@ const styles = {
     border: '1px solid #334155',
     background: '#0f172a',
     textAlign: 'left',
+    whiteSpace: 'nowrap',
   },
 
   td: {
     padding: '14px',
     border: '1px solid #334155',
+    verticalAlign: 'middle',
   },
 
   badge: {
+    display: 'inline-block',
     padding: '6px 10px',
     borderRadius: '999px',
     fontSize: '12px',
     fontWeight: 'bold',
+    textTransform: 'capitalize',
   },
 
   warningBadge: {
+    display: 'inline-block',
     background: '#78350f',
     color: '#fde68a',
     padding: '6px 10px',
@@ -695,21 +1152,25 @@ const styles = {
     fontWeight: 'bold',
   },
 
+  actionButtons: {
+    display: 'flex',
+    gap: '10px',
+  },
+
   editButton: {
     background: '#2563eb',
     border: 'none',
-    color: 'white',
+    color: '#ffffff',
     padding: '10px 14px',
     borderRadius: '8px',
     cursor: 'pointer',
     fontWeight: 'bold',
-    marginRight: '10px',
   },
 
   deleteButton: {
     background: '#dc2626',
     border: 'none',
-    color: 'white',
+    color: '#ffffff',
     padding: '10px 14px',
     borderRadius: '8px',
     cursor: 'pointer',
@@ -719,14 +1180,35 @@ const styles = {
   helperText: {
     color: '#94a3b8',
     fontSize: '13px',
-    marginTop: '-10px',
-    marginBottom: '16px',
+    marginTop: '-8px',
+    marginBottom: 0,
+  },
+
+  emptyState: {
+    padding: '28px',
+    border: '1px solid #334155',
+    borderRadius: '12px',
+    background: '#0f172a',
+    color: '#94a3b8',
+    textAlign: 'center',
+  },
+
+  errorPanel: {
+    maxWidth: '640px',
+    margin: '80px auto',
+    padding: '24px',
+    border: '1px solid #7f1d1d',
+    borderRadius: '12px',
+    background: '#450a0a',
+    color: '#fecaca',
+    textAlign: 'center',
   },
 
   modalOverlay: {
     position: 'fixed',
     inset: 0,
-    background: 'rgba(0, 0, 0, 0.7)',
+    padding: '20px',
+    background: 'rgba(0, 0, 0, 0.75)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -734,11 +1216,14 @@ const styles = {
   },
 
   modal: {
+    width: '100%',
+    maxWidth: '440px',
+    maxHeight: '90vh',
+    overflowY: 'auto',
     background: '#0f172a',
     border: '1px solid #334155',
     borderRadius: '12px',
     padding: '30px',
-    width: '420px',
   },
 
   modalButtons: {
@@ -749,7 +1234,8 @@ const styles = {
   previewOverlay: {
     position: 'fixed',
     inset: 0,
-    background: 'rgba(0, 0, 0, 0.85)',
+    padding: '20px',
+    background: 'rgba(0, 0, 0, 0.88)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -759,6 +1245,7 @@ const styles = {
   previewModal: {
     width: '90%',
     height: '90%',
+    boxSizing: 'border-box',
     background: '#0f172a',
     border: '1px solid #334155',
     borderRadius: '14px',
@@ -769,6 +1256,7 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: '16px',
     marginBottom: '16px',
   },
 
@@ -787,13 +1275,13 @@ const styles = {
     height: 'calc(100% - 76px)',
     border: '1px solid #334155',
     borderRadius: '10px',
-    background: 'white',
+    background: '#ffffff',
   },
 
   closeButton: {
     background: '#dc2626',
     border: 'none',
-    color: 'white',
+    color: '#ffffff',
     padding: '10px 16px',
     borderRadius: '8px',
     cursor: 'pointer',

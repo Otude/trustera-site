@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { supabase } from '../supabase'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
+
+import { supabase } from '../supabase'
 
 export default function AuditLogs({ profile }) {
   const [logs, setLogs] = useState([])
@@ -9,81 +10,229 @@ export default function AuditLogs({ profile }) {
   const [search, setSearch] = useState('')
   const [actionFilter, setActionFilter] = useState('all')
 
+  const companyId = profile?.company_id || null
+
+  const fetchLogs = useCallback(
+    async ({ showLoading = true } = {}) => {
+      if (!companyId) {
+        setLogs([])
+        setLoading(false)
+        return
+      }
+
+      if (showLoading) {
+        setLoading(true)
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('audit_logs')
+          .select(`
+            id,
+            company_id,
+            user_id,
+            user_email,
+            action,
+            entity_type,
+            entity_id,
+            entity_name,
+            details,
+            created_at
+          `)
+          .eq('company_id', companyId)
+          .order('created_at', { ascending: false })
+
+        if (error) {
+          throw error
+        }
+
+        setLogs(data || [])
+      } catch (error) {
+        console.error('Unable to load audit logs:', error)
+        toast.error(error?.message || 'Unable to load audit logs.')
+      } finally {
+        if (showLoading) {
+          setLoading(false)
+        }
+      }
+    },
+    [companyId],
+  )
+
   useEffect(() => {
+    if (!companyId) {
+      setLogs([])
+      setLoading(false)
+      return undefined
+    }
+
     fetchLogs()
 
     const channel = supabase
-      .channel('audit_logs_changes')
+      .channel(`audit-logs-${companyId}`)
       .on(
         'postgres_changes',
         {
-          event: '*',
+          event: 'INSERT',
           schema: 'public',
           table: 'audit_logs',
+          filter: `company_id=eq.${companyId}`,
         },
-        () => {
-          fetchLogs()
-        }
+        (payload) => {
+          if (payload.new?.company_id !== companyId) {
+            return
+          }
+
+          setLogs((current) => {
+            const alreadyExists = current.some(
+              (item) => item.id === payload.new.id,
+            )
+
+            if (alreadyExists) {
+              return current
+            }
+
+            return [payload.new, ...current]
+          })
+        },
       )
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          console.error('Audit log Realtime channel failed.')
+        }
+      })
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [])
+  }, [companyId, fetchLogs])
 
-  async function fetchLogs() {
-    setLoading(true)
+  function normaliseAction(action) {
+    return String(action || '')
+      .trim()
+      .toLowerCase()
+      .replaceAll('_', ' ')
+      .replaceAll('-', ' ')
+  }
 
-    const { data, error } = await supabase
-      .from('audit_logs')
-      .select('*')
-      .order('created_at', { ascending: false })
+  function formatAction(action) {
+    const normalised = normaliseAction(action)
 
-    if (error) {
-      toast.error(error.message)
-      setLoading(false)
-      return
-    }
+    if (!normalised) return '-'
 
-    setLogs(data || [])
-    setLoading(false)
+    return normalised
+      .split(' ')
+      .filter(Boolean)
+      .map(
+        (word) =>
+          word.charAt(0).toUpperCase() + word.slice(1),
+      )
+      .join(' ')
   }
 
   function formatDate(dateValue) {
     if (!dateValue) return '-'
 
-    return new Date(dateValue).toLocaleString()
+    const date = new Date(dateValue)
+
+    if (Number.isNaN(date.getTime())) {
+      return '-'
+    }
+
+    return date.toLocaleString('en-GB')
+  }
+
+  function formatDetails(details) {
+    if (!details) return '-'
+
+    if (typeof details === 'object') {
+      return JSON.stringify(details, null, 2)
+    }
+
+    const text = String(details)
+
+    try {
+      const parsed = JSON.parse(text)
+
+      if (typeof parsed === 'object' && parsed !== null) {
+        return JSON.stringify(parsed, null, 2)
+      }
+    } catch {
+      // The value is plain text rather than JSON.
+    }
+
+    return text
+  }
+
+  function getActionCategory(action) {
+    const normalised = normaliseAction(action)
+
+    if (
+      normalised.includes('delete') ||
+      normalised.includes('remove')
+    ) {
+      return 'delete'
+    }
+
+    if (
+      normalised.includes('update') ||
+      normalised.includes('edit') ||
+      normalised.includes('change') ||
+      normalised.includes('mark')
+    ) {
+      return 'update'
+    }
+
+    if (
+      normalised.includes('create') ||
+      normalised.includes('upload') ||
+      normalised.includes('add') ||
+      normalised.includes('insert') ||
+      normalised.includes('request')
+    ) {
+      return 'create'
+    }
+
+    if (
+      normalised.includes('login') ||
+      normalised.includes('sign in') ||
+      normalised.includes('view') ||
+      normalised.includes('download')
+    ) {
+      return 'access'
+    }
+
+    return 'other'
   }
 
   function getActionStyle(action) {
-    const normalized = action?.toLowerCase()
+    const category = getActionCategory(action)
 
-    if (normalized?.includes('delete')) {
+    if (category === 'delete') {
       return {
         background: '#7f1d1d',
         color: '#fecaca',
       }
     }
 
-    if (
-      normalized?.includes('update') ||
-      normalized?.includes('edit')
-    ) {
+    if (category === 'update') {
       return {
         background: '#78350f',
         color: '#fde68a',
       }
     }
 
-    if (
-      normalized?.includes('create') ||
-      normalized?.includes('upload') ||
-      normalized?.includes('add')
-    ) {
+    if (category === 'create') {
       return {
         background: '#064e3b',
         color: '#bbf7d0',
+      }
+    }
+
+    if (category === 'access') {
+      return {
+        background: '#1e3a8a',
+        color: '#dbeafe',
       }
     }
 
@@ -93,44 +242,77 @@ export default function AuditLogs({ profile }) {
     }
   }
 
-  const filteredLogs = logs.filter((log) => {
-    const term = search.toLowerCase()
+  const filteredLogs = useMemo(() => {
+    const term = search.trim().toLowerCase()
 
-    const matchesSearch =
-      log.action?.toLowerCase().includes(term) ||
-      log.table_name?.toLowerCase().includes(term) ||
-      log.user_email?.toLowerCase().includes(term) ||
-      log.description?.toLowerCase().includes(term)
+    return logs.filter((log) => {
+      const action = normaliseAction(log.action)
+      const entityType = String(
+        log.entity_type || '',
+      ).toLowerCase()
+      const entityName = String(
+        log.entity_name || '',
+      ).toLowerCase()
+      const userEmail = String(
+        log.user_email || '',
+      ).toLowerCase()
+      const details = formatDetails(log.details).toLowerCase()
 
-    const matchesFilter =
-      actionFilter === 'all' ||
-      log.action?.toLowerCase().includes(actionFilter)
+      const matchesSearch =
+        !term ||
+        action.includes(term) ||
+        entityType.includes(term) ||
+        entityName.includes(term) ||
+        userEmail.includes(term) ||
+        details.includes(term)
 
-    return matchesSearch && matchesFilter
-  })
+      const matchesFilter =
+        actionFilter === 'all' ||
+        getActionCategory(log.action) === actionFilter
 
-  const createCount = logs.filter(
-    (log) =>
-      log.action?.toLowerCase().includes('create') ||
-      log.action?.toLowerCase().includes('upload') ||
-      log.action?.toLowerCase().includes('add')
-  ).length
+      return matchesSearch && matchesFilter
+    })
+  }, [actionFilter, logs, search])
 
-  const updateCount = logs.filter(
-    (log) =>
-      log.action?.toLowerCase().includes('update') ||
-      log.action?.toLowerCase().includes('edit')
-  ).length
+  const createCount = useMemo(
+    () =>
+      logs.filter(
+        (log) => getActionCategory(log.action) === 'create',
+      ).length,
+    [logs],
+  )
 
-  const deleteCount = logs.filter((log) =>
-    log.action?.toLowerCase().includes('delete')
-  ).length
+  const updateCount = useMemo(
+    () =>
+      logs.filter(
+        (log) => getActionCategory(log.action) === 'update',
+      ).length,
+    [logs],
+  )
 
-  if (loading) {
+  const deleteCount = useMemo(
+    () =>
+      logs.filter(
+        (log) => getActionCategory(log.action) === 'delete',
+      ).length,
+    [logs],
+  )
+
+  const accessCount = useMemo(
+    () =>
+      logs.filter(
+        (log) => getActionCategory(log.action) === 'access',
+      ).length,
+    [logs],
+  )
+
+  if (!companyId) {
     return (
       <div style={styles.page}>
-        <h1>Audit Logs</h1>
-        <p style={styles.emptyText}>Loading audit logs...</p>
+        <div style={styles.errorPanel}>
+          Your account is not assigned to a company. Sign out and
+          contact an administrator.
+        </div>
       </div>
     )
   }
@@ -139,12 +321,22 @@ export default function AuditLogs({ profile }) {
     <div style={styles.page}>
       <div style={styles.headerRow}>
         <div>
-          <h1>Audit Logs</h1>
+          <h1 style={styles.pageTitle}>Audit Logs</h1>
 
           <p style={styles.subText}>
-            Track system activity and administrative actions.
+            Review system activity and administrative actions for
+            your organisation.
           </p>
         </div>
+
+        <button
+          type="button"
+          onClick={() => fetchLogs()}
+          style={styles.refreshButton}
+          disabled={loading}
+        >
+          {loading ? 'Refreshing...' : 'Refresh'}
+        </button>
       </div>
 
       <div style={styles.statsGrid}>
@@ -152,41 +344,51 @@ export default function AuditLogs({ profile }) {
         <StatCard title="Create Actions" value={createCount} />
         <StatCard title="Update Actions" value={updateCount} />
         <StatCard title="Delete Actions" value={deleteCount} />
+        <StatCard title="Access Actions" value={accessCount} />
       </div>
 
       <div style={styles.filterRow}>
         <input
           type="text"
-          placeholder="Search audit logs..."
+          placeholder="Search by action, entity, user, or details..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(event) => setSearch(event.target.value)}
           style={styles.searchInput}
         />
 
         <select
           value={actionFilter}
-          onChange={(e) => setActionFilter(e.target.value)}
+          onChange={(event) =>
+            setActionFilter(event.target.value)
+          }
           style={styles.filterSelect}
         >
           <option value="all">All Actions</option>
           <option value="create">Create</option>
-          <option value="upload">Upload</option>
           <option value="update">Update</option>
-          <option value="edit">Edit</option>
           <option value="delete">Delete</option>
+          <option value="access">Access</option>
+          <option value="other">Other</option>
         </select>
       </div>
 
-      {filteredLogs.length === 0 ? (
-        <p style={styles.emptyText}>No audit logs found.</p>
+      {loading ? (
+        <div style={styles.emptyState}>
+          Loading audit logs...
+        </div>
+      ) : filteredLogs.length === 0 ? (
+        <div style={styles.emptyState}>
+          No matching audit logs found.
+        </div>
       ) : (
         <div style={styles.tableWrapper}>
           <table style={styles.table}>
             <thead>
               <tr>
                 <th style={styles.th}>Action</th>
-                <th style={styles.th}>Table</th>
-                <th style={styles.th}>Description</th>
+                <th style={styles.th}>Entity Type</th>
+                <th style={styles.th}>Entity</th>
+                <th style={styles.th}>Details</th>
                 <th style={styles.th}>User</th>
                 <th style={styles.th}>Logged At</th>
               </tr>
@@ -202,20 +404,40 @@ export default function AuditLogs({ profile }) {
                         ...getActionStyle(log.action),
                       }}
                     >
-                      {log.action || '-'}
+                      {formatAction(log.action)}
                     </span>
                   </td>
 
                   <td style={styles.td}>
-                    {log.table_name || '-'}
+                    {log.entity_type || '-'}
                   </td>
 
                   <td style={styles.td}>
-                    {log.description || '-'}
+                    <div style={styles.entityName}>
+                      {log.entity_name || '-'}
+                    </div>
+
+                    {log.entity_id && (
+                      <div style={styles.entityId}>
+                        ID: {log.entity_id}
+                      </div>
+                    )}
                   </td>
 
                   <td style={styles.td}>
-                    {log.user_email || '-'}
+                    <pre style={styles.detailsText}>
+                      {formatDetails(log.details)}
+                    </pre>
+                  </td>
+
+                  <td style={styles.td}>
+                    <div>{log.user_email || '-'}</div>
+
+                    {log.user_id && (
+                      <div style={styles.userId}>
+                        ID: {log.user_id}
+                      </div>
+                    )}
                   </td>
 
                   <td style={styles.td}>
@@ -234,8 +456,8 @@ export default function AuditLogs({ profile }) {
 function StatCard({ title, value }) {
   return (
     <div style={styles.statCard}>
-      <h2>{value}</h2>
-      <p>{title}</p>
+      <h2 style={styles.statValue}>{value}</h2>
+      <p style={styles.statTitle}>{title}</p>
     </div>
   )
 }
@@ -243,27 +465,46 @@ function StatCard({ title, value }) {
 const styles = {
   page: {
     padding: '40px',
-    color: 'white',
+    color: '#ffffff',
     background: '#020617',
     minHeight: '100vh',
+  },
+
+  pageTitle: {
+    marginTop: 0,
+    marginBottom: 0,
   },
 
   headerRow: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '20px',
     marginBottom: '24px',
   },
 
   subText: {
     color: '#94a3b8',
     marginTop: '8px',
+    marginBottom: 0,
+  },
+
+  refreshButton: {
+    padding: '12px 16px',
+    border: 'none',
+    borderRadius: '8px',
+    background: '#2563eb',
+    color: '#ffffff',
+    fontWeight: 'bold',
+    cursor: 'pointer',
   },
 
   statsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-    gap: '20px',
+    gridTemplateColumns:
+      'repeat(auto-fit, minmax(180px, 1fr))',
+    gap: '16px',
     marginBottom: '30px',
   },
 
@@ -274,19 +515,30 @@ const styles = {
     padding: '22px',
   },
 
+  statValue: {
+    marginTop: 0,
+    marginBottom: '8px',
+  },
+
+  statTitle: {
+    margin: 0,
+  },
+
   filterRow: {
     display: 'flex',
+    flexWrap: 'wrap',
     gap: '16px',
     marginBottom: '24px',
   },
 
   searchInput: {
+    minWidth: '280px',
     flex: 1,
     padding: '14px',
     borderRadius: '10px',
     border: '1px solid #334155',
     background: '#1e293b',
-    color: 'white',
+    color: '#ffffff',
   },
 
   filterSelect: {
@@ -294,15 +546,17 @@ const styles = {
     borderRadius: '10px',
     border: '1px solid #334155',
     background: '#1e293b',
-    color: 'white',
+    color: '#ffffff',
   },
 
   tableWrapper: {
+    width: '100%',
     overflowX: 'auto',
   },
 
   table: {
     width: '100%',
+    minWidth: '1200px',
     borderCollapse: 'collapse',
   },
 
@@ -311,6 +565,7 @@ const styles = {
     padding: '14px',
     background: '#0f172a',
     textAlign: 'left',
+    whiteSpace: 'nowrap',
   },
 
   td: {
@@ -320,15 +575,58 @@ const styles = {
   },
 
   badge: {
+    display: 'inline-block',
     padding: '6px 10px',
     borderRadius: '999px',
     fontSize: '12px',
     fontWeight: 'bold',
-    display: 'inline-block',
-    textTransform: 'capitalize',
+    whiteSpace: 'nowrap',
   },
 
-  emptyText: {
+  entityName: {
+    fontWeight: 600,
+  },
+
+  entityId: {
+    marginTop: '6px',
+    color: '#64748b',
+    fontSize: '11px',
+    overflowWrap: 'anywhere',
+  },
+
+  userId: {
+    marginTop: '6px',
+    color: '#64748b',
+    fontSize: '11px',
+    overflowWrap: 'anywhere',
+  },
+
+  detailsText: {
+    margin: 0,
+    maxWidth: '420px',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+    fontFamily: 'inherit',
+    color: '#cbd5e1',
+  },
+
+  emptyState: {
+    padding: '28px',
+    border: '1px solid #334155',
+    borderRadius: '12px',
+    background: '#0f172a',
     color: '#94a3b8',
+    textAlign: 'center',
+  },
+
+  errorPanel: {
+    maxWidth: '640px',
+    margin: '80px auto',
+    padding: '24px',
+    border: '1px solid #7f1d1d',
+    borderRadius: '12px',
+    background: '#450a0a',
+    color: '#fecaca',
+    textAlign: 'center',
   },
 }
