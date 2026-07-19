@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
 import { supabase } from '../supabase'
@@ -14,6 +14,7 @@ export default function Documents({ profile }) {
   const [documentType, setDocumentType] = useState('')
   const [expiryDate, setExpiryDate] = useState('')
   const [file, setFile] = useState(null)
+  const fileInputRef = useRef(null)
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -265,24 +266,33 @@ export default function Documents({ profile }) {
         selectedFile: file,
       })
 
-      const { error: uploadError } = await supabase.storage
-        .from(DOCUMENTS_BUCKET)
-        .upload(uploadedFilePath, file, {
-          cacheControl: '3600',
-          upsert: false,
-          contentType: file.type || undefined,
-        })
+      const { data: uploadData, error: uploadError } =
+        await supabase.storage
+          .from(DOCUMENTS_BUCKET)
+          .upload(uploadedFilePath, file, {
+            cacheControl: '3600',
+            upsert: false,
+            contentType: file.type || undefined,
+          })
 
       if (uploadError) {
         throw uploadError
       }
+
+      const storedFilePath = uploadData?.path || uploadedFilePath
+
+      if (!storedFilePath) {
+        throw new Error('Supabase Storage did not return a file path.')
+      }
+
+      uploadedFilePath = storedFilePath
 
       const documentRecord = {
         company_id: currentCompanyId,
         worker_id: selectedWorkerData.id,
         document_type: trimmedDocumentType,
         expiry_date: expiryDate,
-        file_path: uploadedFilePath,
+        file_path: storedFilePath,
         status: calculateStatus(expiryDate),
       }
 
@@ -330,12 +340,8 @@ export default function Documents({ profile }) {
       setExpiryDate('')
       setFile(null)
 
-      const fileInput = event.currentTarget.querySelector(
-        'input[type="file"]',
-      )
-
-      if (fileInput) {
-        fileInput.value = ''
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
       }
 
       await fetchDocuments()
@@ -749,7 +755,9 @@ export default function Documents({ profile }) {
         />
 
         <input
+          ref={fileInputRef}
           type="file"
+          accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
           onChange={(event) => setFile(event.target.files?.[0] || null)}
           style={styles.input}
           disabled={submitting}
