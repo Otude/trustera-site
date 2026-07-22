@@ -6,6 +6,7 @@ import { supabase } from './supabase'
 
 import Header from './components/Header'
 
+import Landing from './Pages/Landing'
 import Login from './Pages/Login'
 import Dashboard from './Pages/Dashboard'
 import Workers from './Pages/Workers'
@@ -166,10 +167,7 @@ export default function App() {
       />
 
       {!session ? (
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
+        <PublicApp />
       ) : !profile ? (
         <ProfileErrorScreen
           message={
@@ -181,6 +179,21 @@ export default function App() {
         <AuthenticatedApp profile={profile} />
       )}
     </BrowserRouter>
+  )
+}
+
+function PublicApp() {
+  return (
+    <Routes>
+      <Route path="/" element={<Landing />} />
+
+      <Route path="/login" element={<Login />} />
+
+      <Route
+        path="*"
+        element={<Navigate to="/" replace />}
+      />
+    </Routes>
   )
 }
 
@@ -275,9 +288,25 @@ function LoadingScreen({ message }) {
 }
 
 function ProfileErrorScreen({ message }) {
+  const [signingOut, setSigningOut] = useState(false)
+
   async function handleSignOut() {
-    await supabase.auth.signOut()
-    window.location.href = '/login'
+    if (signingOut) return
+
+    setSigningOut(true)
+
+    try {
+      const { error } = await supabase.auth.signOut()
+
+      if (error) {
+        throw error
+      }
+
+      window.location.replace('/')
+    } catch (error) {
+      console.error('Unable to sign out:', error)
+      setSigningOut(false)
+    }
   }
 
   return (
@@ -326,17 +355,18 @@ function ProfileErrorScreen({ message }) {
         <button
           type="button"
           onClick={handleSignOut}
+          disabled={signingOut}
           style={{
             padding: '12px 20px',
             border: 0,
             borderRadius: '10px',
-            background: '#2563eb',
+            background: signingOut ? '#475569' : '#2563eb',
             color: '#ffffff',
             fontWeight: 700,
-            cursor: 'pointer',
+            cursor: signingOut ? 'not-allowed' : 'pointer',
           }}
         >
-          Sign out
+          {signingOut ? 'Signing out...' : 'Sign out'}
         </button>
       </div>
     </div>
