@@ -1,20 +1,26 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../supabase'
 import toast from 'react-hot-toast'
 
-const REDIRECT_URL =
-  import.meta.env.MODE === 'development'
-    ? 'http://localhost:5173'
-    : 'https://trust.jemadi.co.uk'
+function getRedirectUrl() {
+  if (typeof window === 'undefined') {
+    return 'https://trust.jemadi.co.uk/login'
+  }
+
+  return `${window.location.origin}/login`
+}
 
 export default function Login() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
 
-  async function handleLogin(e) {
-    e.preventDefault()
+  async function handleLogin(event) {
+    event.preventDefault()
 
-    if (!email.trim()) {
+    const normalizedEmail = email.trim().toLowerCase()
+
+    if (!normalizedEmail) {
       toast.error('Please enter your email address.')
       return
     }
@@ -23,9 +29,10 @@ export default function Login() {
 
     try {
       const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim().toLowerCase(),
+        email: normalizedEmail,
         options: {
-          emailRedirectTo: REDIRECT_URL,
+          emailRedirectTo: getRedirectUrl(),
+          shouldCreateUser: false,
         },
       })
 
@@ -34,17 +41,32 @@ export default function Login() {
       }
 
       toast.success(
-        'Magic login link sent. Please check your email.'
+        'Magic login link sent. Please check your email.',
       )
 
       setEmail('')
     } catch (error) {
       console.error('Login error:', error)
 
-      toast.error(
-        error?.message ||
-          'Unable to send login link. Please try again.',
-      )
+      const message = error?.message?.toLowerCase() || ''
+
+      if (message.includes('email rate limit exceeded')) {
+        toast.error(
+          'Too many login links have been requested. Please wait a few minutes before trying again.',
+        )
+      } else if (
+        message.includes('signups not allowed') ||
+        message.includes('user not found')
+      ) {
+        toast.error(
+          'This email is not registered for Trustera. Contact your administrator.',
+        )
+      } else {
+        toast.error(
+          error?.message ||
+            'Unable to send the login link. Please try again.',
+        )
+      }
     } finally {
       setLoading(false)
     }
@@ -64,19 +86,30 @@ export default function Login() {
         <h2 style={styles.heading}>Sign in</h2>
 
         <p style={styles.description}>
-          Enter your work email address and we'll send you a secure
-          magic link.
+          Enter your work email address and we&apos;ll send you a
+          secure magic link.
         </p>
 
         <form onSubmit={handleLogin} style={styles.form}>
+          <label htmlFor="login-email" style={styles.label}>
+            Work email address
+          </label>
+
           <input
+            id="login-email"
+            name="email"
             type="email"
-            placeholder="Email address"
+            placeholder="name@company.com"
             autoComplete="email"
+            inputMode="email"
             required
+            disabled={loading}
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={styles.input}
+            onChange={(event) => setEmail(event.target.value)}
+            style={{
+              ...styles.input,
+              ...(loading ? styles.inputDisabled : {}),
+            }}
           />
 
           <button
@@ -93,10 +126,15 @@ export default function Login() {
           </button>
         </form>
 
+        <div style={styles.homeSection}>
+          <Link to="/" style={styles.homeLink}>
+            Return to Trustera home
+          </Link>
+        </div>
+
         <div style={styles.footer}>
           <p style={styles.footerText}>
-            Secure passwordless authentication powered by
-            Supabase.
+            Secure passwordless authentication powered by Supabase.
           </p>
         </div>
       </div>
@@ -112,6 +150,7 @@ const styles = {
     justifyContent: 'center',
     background: '#020617',
     padding: '24px',
+    boxSizing: 'border-box',
   },
 
   card: {
@@ -122,6 +161,7 @@ const styles = {
     borderRadius: '18px',
     padding: '40px',
     boxSizing: 'border-box',
+    boxShadow: '0 24px 60px rgba(0, 0, 0, 0.3)',
   },
 
   logo: {
@@ -138,28 +178,39 @@ const styles = {
 
   subtitle: {
     marginTop: '8px',
+    marginBottom: 0,
     color: '#94a3b8',
     fontSize: '14px',
   },
 
   heading: {
     color: '#ffffff',
+    marginTop: 0,
     marginBottom: '8px',
+    fontSize: '21px',
   },
 
   description: {
     color: '#94a3b8',
     lineHeight: 1.6,
+    marginTop: 0,
     marginBottom: '24px',
   },
 
   form: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '16px',
+    gap: '14px',
+  },
+
+  label: {
+    color: '#e2e8f0',
+    fontSize: '14px',
+    fontWeight: 600,
   },
 
   input: {
+    width: '100%',
     padding: '15px',
     borderRadius: '10px',
     border: '1px solid #334155',
@@ -167,9 +218,16 @@ const styles = {
     color: '#ffffff',
     fontSize: '15px',
     outline: 'none',
+    boxSizing: 'border-box',
+  },
+
+  inputDisabled: {
+    opacity: 0.7,
+    cursor: 'not-allowed',
   },
 
   button: {
+    width: '100%',
     padding: '15px',
     border: 'none',
     borderRadius: '10px',
@@ -178,12 +236,24 @@ const styles = {
     fontWeight: 700,
     fontSize: '15px',
     cursor: 'pointer',
-    transition: '0.2s',
+    transition: 'opacity 0.2s ease',
   },
 
   buttonDisabled: {
     opacity: 0.7,
     cursor: 'not-allowed',
+  },
+
+  homeSection: {
+    marginTop: '22px',
+    textAlign: 'center',
+  },
+
+  homeLink: {
+    color: '#60a5fa',
+    fontSize: '14px',
+    fontWeight: 600,
+    textDecoration: 'none',
   },
 
   footer: {
@@ -194,6 +264,7 @@ const styles = {
   footerText: {
     color: '#64748b',
     fontSize: '13px',
+    lineHeight: 1.5,
     margin: 0,
   },
 }
