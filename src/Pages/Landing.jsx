@@ -175,49 +175,127 @@ const productScreens = [
   {
     id: 'dashboard',
     label: 'Dashboard',
+    icon: '◫',
+    eyebrow: 'Live compliance overview',
     title: 'See compliance risk at a glance',
     description:
       'Review workforce status, document validity, expiry risks and compliance performance from one central dashboard.',
     image: '/screenshots/dashboard.webp',
     alt: 'Trustera workforce compliance dashboard',
+    highlights: [
+      'Compliance score',
+      'Workforce analytics',
+      'Document status',
+      'Exportable reports',
+    ],
+    legend: [
+      { label: 'Valid', tone: 'emerald' },
+      { label: 'Expiring Soon', tone: 'amber' },
+      { label: 'Expired', tone: 'red' },
+    ],
   },
   {
     id: 'workers',
     label: 'Workers',
+    icon: '♙',
+    eyebrow: 'Structured workforce records',
     title: 'Manage every worker from one place',
     description:
       'Maintain worker records, roles, sites, employment status and compliance information in a structured workflow.',
     image: '/screenshots/workers.webp',
     alt: 'Trustera worker management screen',
+    highlights: [
+      'Worker profiles',
+      'Role and site visibility',
+      'Employment status',
+      'Fast search',
+    ],
+    legend: [
+      { label: 'Active', tone: 'emerald' },
+      { label: 'Inactive', tone: 'red' },
+      { label: 'Profile access', tone: 'blue' },
+    ],
   },
   {
     id: 'documents',
     label: 'Documents',
+    icon: '▤',
+    eyebrow: 'Expiry-aware document control',
     title: 'Monitor documents and expiry dates',
     description:
       'Track licences, right-to-work evidence, training records and other workforce documents before they expire.',
     image: '/screenshots/documents.webp',
     alt: 'Trustera document tracking screen',
+    highlights: [
+      'Secure uploads',
+      'Expiry dates',
+      'Document status',
+      'Worker association',
+    ],
+    legend: [
+      { label: 'Valid', tone: 'emerald' },
+      { label: 'Expiring Soon', tone: 'amber' },
+      { label: 'Expired', tone: 'red' },
+    ],
   },
   {
     id: 'notifications',
     label: 'Notifications',
+    icon: '✉',
+    eyebrow: 'Prioritised compliance alerts',
     title: 'Act before documents become a risk',
     description:
       'Review alerts for expired and expiring records so compliance teams can follow up promptly.',
     image: '/screenshots/notifications.webp',
     alt: 'Trustera compliance notifications screen',
+    highlights: [
+      'Unread alerts',
+      'Severity indicators',
+      'Expiry warnings',
+      'Read tracking',
+    ],
+    legend: [
+      { label: 'Unread', tone: 'blue' },
+      { label: 'Expired', tone: 'red' },
+      { label: 'Expiring Soon', tone: 'amber' },
+      { label: 'Read', tone: 'emerald' },
+    ],
   },
   {
     id: 'audit-logs',
     label: 'Audit Logs',
+    icon: '☷',
+    eyebrow: 'Accountability and traceability',
     title: 'Maintain a clear accountability record',
     description:
       'Review important system activity and administrative actions in an organised audit trail.',
     image: '/screenshots/audit-logs.webp',
     alt: 'Trustera audit logs screen',
+    highlights: [
+      'Create actions',
+      'Update actions',
+      'Delete actions',
+      'Access events',
+    ],
+    legend: [
+      { label: 'Create', tone: 'emerald' },
+      { label: 'Update', tone: 'amber' },
+      { label: 'Delete', tone: 'red' },
+      { label: 'Access', tone: 'purple' },
+    ],
   },
 ]
+
+const PRODUCT_LEGEND_STYLES = {
+  blue: 'border-blue-500/30 bg-blue-500/10 text-blue-200',
+  emerald:
+    'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
+  amber:
+    'border-amber-500/30 bg-amber-500/10 text-amber-200',
+  red: 'border-red-500/30 bg-red-500/10 text-red-200',
+  purple:
+    'border-purple-500/30 bg-purple-500/10 text-purple-200',
+}
 
 function AnimatedNumber({
   value,
@@ -764,6 +842,13 @@ export default function TrusteraLandingPage() {
                         : 'border border-slate-700 bg-slate-900 text-slate-300 hover:border-blue-500'
                     }`}
                   >
+                    <span
+                      className="mr-2 text-base"
+                      aria-hidden="true"
+                    >
+                      {screen.icon}
+                    </span>
+
                     {screen.label}
                   </button>
                 )
@@ -779,13 +864,34 @@ export default function TrusteraLandingPage() {
             className="mt-8 overflow-hidden rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl"
           >
             <div className="border-b border-slate-800 p-6 md:p-8">
-              <h3 className="text-2xl font-bold md:text-3xl">
-                {selectedProductScreen.title}
-              </h3>
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-3xl">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-400">
+                    {selectedProductScreen.eyebrow}
+                  </p>
 
-              <p className="mt-3 max-w-3xl leading-7 text-slate-400">
-                {selectedProductScreen.description}
-              </p>
+                  <h3 className="mt-3 text-2xl font-bold md:text-3xl">
+                    {selectedProductScreen.title}
+                  </h3>
+
+                  <p className="mt-3 leading-7 text-slate-400">
+                    {selectedProductScreen.description}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:max-w-md lg:grid-cols-2">
+                  {selectedProductScreen.highlights.map(
+                    (highlight) => (
+                      <div
+                        key={highlight}
+                        className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-center text-xs font-semibold text-slate-300"
+                      >
+                        {highlight}
+                      </div>
+                    ),
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="bg-slate-950 p-3 md:p-6">
@@ -832,9 +938,35 @@ export default function TrusteraLandingPage() {
                 </div>
               )}
               {!imageError && (
-                <p className="mt-4 text-center text-xs text-slate-500">
-                  Select the image to view the full-resolution product screen.
-                </p>
+                <>
+                  <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+                    {selectedProductScreen.legend.map((item) => (
+                      <span
+                        key={`${selectedProductScreen.id}-${item.label}`}
+                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                          PRODUCT_LEGEND_STYLES[item.tone]
+                        }`}
+                      >
+                        <span
+                          className="h-2 w-2 rounded-full bg-current"
+                          aria-hidden="true"
+                        />
+
+                        {item.label}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 flex flex-col items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-center text-xs text-slate-500 sm:flex-row sm:text-left">
+                    <span>
+                      Product preview uses anonymised demonstration data.
+                    </span>
+
+                    <span className="font-semibold text-blue-300">
+                      Select the image to open the full-resolution screen.
+                    </span>
+                  </div>
+                </>
               )}
             </div>
           </motion.div>
