@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 
@@ -33,79 +33,93 @@ const sectors = [
 ]
 
 const benefits = [
-  [
-    'Never miss an expiry',
-    'Track licences, right-to-work records and certifications before they become a risk.',
-  ],
-  [
-    'Replace manual reminders',
-    'Move away from spreadsheets, calendar reminders and email chasing.',
-  ],
-  [
-    'Stay audit-ready',
-    'Keep workforce compliance records visible, organised and ready for review.',
-  ],
-  [
-    'Manage every site',
-    'See compliance status across teams, roles and locations from one dashboard.',
-  ],
+  {
+    title: 'Never miss an expiry',
+    description:
+      'Track licences, right-to-work records and certifications before they become a risk.',
+  },
+  {
+    title: 'Replace manual reminders',
+    description:
+      'Move away from spreadsheets, calendar reminders and email chasing.',
+  },
+  {
+    title: 'Stay audit-ready',
+    description:
+      'Keep workforce compliance records visible, organised and ready for review.',
+  },
+  {
+    title: 'Manage every site',
+    description:
+      'See compliance status across teams, roles and locations from one dashboard.',
+  },
 ]
 
 const plans = [
-  [
-    'Early Access',
-    'For teams validating workforce compliance workflows.',
-  ],
-  [
-    'Pilot Programme',
-    'For growing teams ready to test Trustera with real users.',
-  ],
-  [
-    'Enterprise',
-    'For multi-site operations needing tailored onboarding.',
-  ],
+  {
+    title: 'Early Access',
+    description:
+      'For teams validating workforce compliance workflows.',
+  },
+  {
+    title: 'Pilot Programme',
+    description:
+      'For growing teams ready to test Trustera with real users.',
+  },
+  {
+    title: 'Enterprise',
+    description:
+      'For multi-site operations needing tailored onboarding.',
+  },
 ]
 
 const discoveryInsights = [
-  [
-    'Compliance data is often fragmented',
-    'Recruitment platforms, HR systems, training portals and spreadsheets often each hold part of the compliance picture.',
-  ],
-  [
-    'Manual tracking still survives',
-    'Many teams still rely on spreadsheets, emails and calendar reminders to monitor expiries and follow-ups.',
-  ],
-  [
-    'Audit preparation takes time',
-    'When documents are spread across systems, teams spend unnecessary time gathering evidence before audits.',
-  ],
+  {
+    title: 'Compliance data is often fragmented',
+    description:
+      'Recruitment platforms, HR systems, training portals and spreadsheets often each hold part of the compliance picture.',
+  },
+  {
+    title: 'Manual tracking still survives',
+    description:
+      'Many teams still rely on spreadsheets, emails and calendar reminders to monitor expiries and follow-ups.',
+  },
+  {
+    title: 'Audit preparation takes time',
+    description:
+      'When documents are spread across systems, teams spend unnecessary time gathering evidence before audits.',
+  },
 ]
 
 const workflow = [
-  [
-    '1',
-    '👤',
-    'Add workers',
-    'Create worker records with their role, site and current employment status.',
-  ],
-  [
-    '2',
-    '📄',
-    'Upload documents',
-    'Store right-to-work documents, licences, certifications, DBS checks and training records.',
-  ],
-  [
-    '3',
-    '⏰',
-    'Monitor expiries',
-    'Trustera tracks document status and flags expired or soon-to-expire records.',
-  ],
-  [
-    '4',
-    '🛡️',
-    'Stay audit-ready',
-    'Use dashboards, alerts, audit logs and reports to maintain compliance visibility.',
-  ],
+  {
+    number: '1',
+    icon: '👤',
+    title: 'Add workers',
+    description:
+      'Create worker records with their role, site and current employment status.',
+  },
+  {
+    number: '2',
+    icon: '📄',
+    title: 'Upload documents',
+    description:
+      'Store right-to-work documents, licences, certifications, DBS checks and training records.',
+  },
+  {
+    number: '3',
+    icon: '⏰',
+    title: 'Monitor expiries',
+    description:
+      'Trustera tracks document status and flags expired or soon-to-expire records.',
+  },
+  {
+    number: '4',
+    icon: '🛡️',
+    title: 'Stay audit-ready',
+    description:
+      'Use dashboards, alerts, audit logs and reports to maintain compliance visibility.',
+  },
 ]
 
 const securityFeatures = [
@@ -117,19 +131,157 @@ const securityFeatures = [
 ]
 
 const dashboardStats = [
-  ['Active Workers', '46'],
-  ['Critical Alerts', '2'],
-  ['Workers Compliant', '43 / 46'],
-  ['Expiring Docs', '3'],
+  {
+    label: 'Active Workers',
+    value: 46,
+  },
+  {
+    label: 'Critical Alerts',
+    value: 2,
+  },
+  {
+    label: 'Workers Compliant',
+    value: 43,
+    suffix: ' / 46',
+  },
+  {
+    label: 'Expiring Docs',
+    value: 3,
+  },
 ]
 
 const chartValues = [30, 55, 45, 70, 60, 85, 78]
+
+const validationStats = [
+  {
+    value: '12+',
+    label: 'Discovery conversations',
+  },
+  {
+    value: '6',
+    label: 'Operational sectors represented',
+  },
+  {
+    value: '5',
+    label: 'Core compliance workflows',
+  },
+  {
+    value: 'UK',
+    label: 'Initial market focus',
+  },
+]
+
+const productScreens = [
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    title: 'See compliance risk at a glance',
+    description:
+      'Review workforce status, document validity, expiry risks and compliance performance from one central dashboard.',
+    image: '/screenshots/dashboard.webp',
+    alt: 'Trustera workforce compliance dashboard',
+  },
+  {
+    id: 'workers',
+    label: 'Workers',
+    title: 'Manage every worker from one place',
+    description:
+      'Maintain worker records, roles, sites, employment status and compliance information in a structured workflow.',
+    image: '/screenshots/workers.webp',
+    alt: 'Trustera worker management screen',
+  },
+  {
+    id: 'documents',
+    label: 'Documents',
+    title: 'Monitor documents and expiry dates',
+    description:
+      'Track licences, right-to-work evidence, training records and other workforce documents before they expire.',
+    image: '/screenshots/documents.webp',
+    alt: 'Trustera document tracking screen',
+  },
+  {
+    id: 'notifications',
+    label: 'Notifications',
+    title: 'Act before documents become a risk',
+    description:
+      'Review alerts for expired and expiring records so compliance teams can follow up promptly.',
+    image: '/screenshots/notifications.webp',
+    alt: 'Trustera compliance notifications screen',
+  },
+  {
+    id: 'audit-logs',
+    label: 'Audit Logs',
+    title: 'Maintain a clear accountability record',
+    description:
+      'Review important system activity and administrative actions in an organised audit trail.',
+    image: '/screenshots/audit-logs.webp',
+    alt: 'Trustera audit logs screen',
+  },
+]
+
+function AnimatedNumber({
+  value,
+  suffix = '',
+  duration = 900,
+}) {
+  const [displayValue, setDisplayValue] = useState(0)
+
+  useEffect(() => {
+    let animationFrame
+    let startTime
+
+    function animate(timestamp) {
+      if (!startTime) {
+        startTime = timestamp
+      }
+
+      const progress = Math.min(
+        (timestamp - startTime) / duration,
+        1,
+      )
+
+      setDisplayValue(Math.round(value * progress))
+
+      if (progress < 1) {
+        animationFrame = requestAnimationFrame(animate)
+      }
+    }
+
+    animationFrame = requestAnimationFrame(animate)
+
+    return () => {
+      cancelAnimationFrame(animationFrame)
+    }
+  }, [value, duration])
+
+  return (
+    <>
+      {displayValue}
+      {suffix}
+    </>
+  )
+}
 
 export default function TrusteraLandingPage() {
   const [formData, setFormData] = useState(INITIAL_FORM_DATA)
   const [submitting, setSubmitting] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
+  const [activeProductScreen, setActiveProductScreen] =
+    useState('dashboard')
+  const [imageError, setImageError] = useState(false)
+
+  const selectedProductScreen = useMemo(
+    () =>
+      productScreens.find(
+        (screen) => screen.id === activeProductScreen,
+      ) || productScreens[0],
+    [activeProductScreen],
+  )
+
+  useEffect(() => {
+    setImageError(false)
+  }, [activeProductScreen])
 
   function handleChange(event) {
     const { name, value } = event.target
@@ -167,7 +319,7 @@ export default function TrusteraLandingPage() {
       industry: formData.industry.trim(),
       challenge: formData.challenge.trim(),
       status: 'new',
-      source: 'landing-page',
+      source: 'demo-request',
       contacted: false,
     }
 
@@ -210,12 +362,12 @@ export default function TrusteraLandingPage() {
       }
 
       setSuccessMessage(
-        'Thank you. Your early access request has been received.',
+        'Thank you. Your demo request has been received.',
       )
 
       setFormData(INITIAL_FORM_DATA)
     } catch (error) {
-      console.error('Early access submission failed:', error)
+      console.error('Demo request submission failed:', error)
 
       setErrorMessage(
         'Something went wrong. Please try again or email hello@jemadi.co.uk.',
@@ -226,8 +378,8 @@ export default function TrusteraLandingPage() {
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-slate-950 pb-20 font-sans text-white md:pb-0">
-      <header className="sticky top-0 z-50 border-b border-slate-800/60 bg-slate-950/85 backdrop-blur-xl">
+    <div className="min-h-screen overflow-x-hidden bg-slate-950 pb-24 font-sans text-white md:pb-0">
+      <header className="sticky top-0 z-50 border-b border-slate-800/60 bg-slate-950/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 md:px-6">
           <a
             href="#top"
@@ -275,6 +427,13 @@ export default function TrusteraLandingPage() {
               </a>
 
               <a
+                href="#product"
+                className="transition hover:text-white"
+              >
+                Product
+              </a>
+
+              <a
                 href="#sectors"
                 className="transition hover:text-white"
               >
@@ -285,13 +444,13 @@ export default function TrusteraLandingPage() {
                 href="#contact"
                 className="transition hover:text-white"
               >
-                Early Access
+                Book a Demo
               </a>
             </nav>
 
             <Link
               to="/login"
-              className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:border-blue-500 hover:bg-slate-900"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:border-blue-500 hover:bg-slate-900"
             >
               Sign in
             </Link>
@@ -300,50 +459,50 @@ export default function TrusteraLandingPage() {
       </header>
 
       <main id="top">
-        <section className="relative mx-auto grid max-w-6xl items-center gap-10 px-4 py-16 md:grid-cols-2 md:gap-12 md:px-6 md:py-24">
+        <section className="relative mx-auto grid max-w-6xl items-center gap-12 px-4 py-20 md:grid-cols-2 md:gap-12 md:px-6 md:py-24">
           <div className="absolute inset-0 -z-10 bg-gradient-to-r from-blue-600/10 to-cyan-400/10 blur-3xl" />
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 22 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7 }}
           >
-            <p className="mb-3 text-sm text-blue-400">
+            <p className="mb-3 text-sm font-semibold text-blue-400">
               Built for regulated frontline teams
             </p>
 
-            <h1 className="text-4xl font-bold leading-tight md:text-6xl">
+            <h1 className="text-4xl font-bold leading-tight sm:text-5xl md:text-6xl">
               Reduce workforce risk. Automate compliance. Stay
               audit-ready.
             </h1>
 
-            <p className="mt-5 max-w-xl text-base leading-7 text-slate-300 md:mt-6 md:text-lg">
+            <p className="mt-6 max-w-xl text-base leading-8 text-slate-300 sm:text-lg">
               Trustera helps HR, compliance and operations teams track
               workforce documents, licence expiries and certifications
               without relying on spreadsheets or manual reminders.
             </p>
 
-            <div className="mt-8 flex flex-wrap gap-4">
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <a
                 href="#contact"
-                className="inline-block rounded-2xl bg-blue-600 px-6 py-3 font-semibold shadow-lg shadow-blue-600/30 transition hover:bg-blue-500"
+                className="inline-flex min-h-[48px] w-full items-center justify-center rounded-2xl bg-blue-600 px-6 py-3 font-semibold shadow-lg shadow-blue-600/30 transition hover:bg-blue-500 sm:w-auto"
               >
-                Request Early Access
+                Book a Demo
+              </a>
+
+              <a
+                href="#product"
+                className="inline-flex min-h-[48px] w-full items-center justify-center rounded-2xl border border-slate-700 px-6 py-3 font-semibold transition hover:border-blue-500 hover:bg-slate-900 sm:w-auto"
+              >
+                See Trustera in Action
               </a>
 
               <Link
                 to="/login"
-                className="inline-block rounded-2xl border border-slate-700 px-6 py-3 font-semibold transition hover:border-blue-500 hover:bg-slate-900"
+                className="inline-flex min-h-[48px] w-full items-center justify-center rounded-2xl border border-slate-700 px-6 py-3 font-semibold transition hover:border-slate-500 sm:w-auto"
               >
                 Sign in
               </Link>
-
-              <a
-                href="#workflow"
-                className="inline-block rounded-2xl border border-slate-700 px-6 py-3 font-semibold transition hover:border-slate-500"
-              >
-                See How It Works
-              </a>
             </div>
 
             <p className="mt-5 text-sm text-slate-500">
@@ -365,19 +524,28 @@ export default function TrusteraLandingPage() {
             className="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 shadow-2xl backdrop-blur md:p-6"
           >
             <div className="grid grid-cols-2 gap-3 md:gap-4">
-              {dashboardStats.map(([label, value]) => (
-                <div
-                  key={label}
+              {dashboardStats.map((stat, index) => (
+                <motion.div
+                  key={stat.label}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    duration: 0.4,
+                    delay: 0.15 + index * 0.1,
+                  }}
                   className="rounded-2xl bg-slate-800 p-4"
                 >
                   <div className="text-xs text-slate-400 md:text-sm">
-                    {label}
+                    {stat.label}
                   </div>
 
                   <div className="mt-2 text-2xl font-bold md:text-3xl">
-                    {value}
+                    <AnimatedNumber
+                      value={stat.value}
+                      suffix={stat.suffix}
+                    />
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
 
@@ -391,10 +559,16 @@ export default function TrusteraLandingPage() {
                 aria-label="Example document expiry chart"
               >
                 {chartValues.map((height, index) => (
-                  <div
+                  <motion.div
                     key={`${height}-${index}`}
+                    initial={{ height: 0 }}
+                    animate={{ height: `${height}%` }}
+                    transition={{
+                      duration: 0.6,
+                      delay: 0.4 + index * 0.08,
+                      ease: 'easeOut',
+                    }}
                     className="flex-1 rounded-t-lg bg-blue-500/70"
-                    style={{ height: `${height}%` }}
                   />
                 ))}
               </div>
@@ -406,35 +580,76 @@ export default function TrusteraLandingPage() {
               </div>
 
               <div className="space-y-2">
-                <div className="rounded-xl border border-red-500/20 bg-red-500/15 px-3 py-2 text-sm text-red-200">
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 1 }}
+                  className="rounded-xl border border-red-500/20 bg-red-500/15 px-3 py-2 text-sm text-red-200"
+                >
                   Driving Licence expired 2 days ago
-                </div>
+                </motion.div>
 
-                <div className="rounded-xl border border-amber-500/20 bg-amber-500/15 px-3 py-2 text-sm text-amber-200">
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 1.2 }}
+                  className="rounded-xl border border-amber-500/20 bg-amber-500/15 px-3 py-2 text-sm text-amber-200"
+                >
                   SIA Licence expires in 5 days
-                </div>
+                </motion.div>
 
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/15 px-3 py-2 text-sm text-emerald-200">
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 1.4 }}
+                  className="rounded-xl border border-emerald-500/20 bg-emerald-500/15 px-3 py-2 text-sm text-emerald-200"
+                >
                   Right to Work verified
-                </div>
+                </motion.div>
               </div>
             </div>
           </motion.div>
         </section>
 
-        <section className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-10">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            {benefits.map(([title, description]) => (
+        <section className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-12">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {validationStats.map((stat, index) => (
+              <motion.div
+                key={stat.label}
+                initial={{ opacity: 0, y: 12 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.4 }}
+                transition={{
+                  duration: 0.4,
+                  delay: index * 0.08,
+                }}
+                className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-center"
+              >
+                <div className="text-3xl font-bold text-blue-400 md:text-4xl">
+                  {stat.value}
+                </div>
+
+                <div className="mt-2 text-sm leading-6 text-slate-400">
+                  {stat.label}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-6xl px-4 py-12 md:px-6 md:py-16">
+          <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-4">
+            {benefits.map((benefit) => (
               <article
-                key={title}
-                className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"
+                key={benefit.title}
+                className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"
               >
                 <h2 className="text-lg font-bold text-blue-300">
-                  {title}
+                  {benefit.title}
                 </h2>
 
-                <p className="mt-2 text-sm leading-6 text-slate-400">
-                  {description}
+                <p className="mt-3 text-sm leading-6 text-slate-400">
+                  {benefit.description}
                 </p>
               </article>
             ))}
@@ -443,9 +658,9 @@ export default function TrusteraLandingPage() {
 
         <section
           id="features"
-          className="mx-auto max-w-6xl scroll-mt-24 px-4 py-16 md:px-6 md:py-20"
+          className="mx-auto max-w-6xl scroll-mt-24 px-4 py-16 md:px-6 md:py-24"
         >
-          <h2 className="text-2xl font-bold md:text-3xl">
+          <h2 className="text-3xl font-bold md:text-4xl">
             Everything needed to stay workforce compliant
           </h2>
 
@@ -455,7 +670,7 @@ export default function TrusteraLandingPage() {
             into one clear workflow.
           </p>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-4">
+          <div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
             {features.map((feature) => (
               <div
                 key={feature}
@@ -469,10 +684,10 @@ export default function TrusteraLandingPage() {
 
         <section
           id="workflow"
-          className="scroll-mt-24 bg-slate-900/50 py-16 md:py-20"
+          className="scroll-mt-24 bg-slate-900/50 py-16 md:py-24"
         >
           <div className="mx-auto max-w-6xl px-4 md:px-6">
-            <h2 className="text-2xl font-bold md:text-3xl">
+            <h2 className="text-3xl font-bold md:text-4xl">
               How Trustera works
             </h2>
 
@@ -482,90 +697,27 @@ export default function TrusteraLandingPage() {
             </p>
 
             <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              {workflow.map(
-                ([number, icon, title, description]) => (
-                  <article
-                    key={number}
-                    className="rounded-3xl border border-slate-800 bg-slate-950 p-6"
-                  >
-                    <div className="mb-5 flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 font-bold">
-                        {number}
-                      </div>
-
-                      <div
-                        className="text-2xl"
-                        aria-hidden="true"
-                      >
-                        {icon}
-                      </div>
+              {workflow.map((step) => (
+                <article
+                  key={step.number}
+                  className="rounded-3xl border border-slate-800 bg-slate-950 p-6"
+                >
+                  <div className="mb-5 flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 font-bold">
+                      {step.number}
                     </div>
 
-                    <h3 className="text-lg font-semibold">
-                      {title}
-                    </h3>
+                    <div className="text-2xl" aria-hidden="true">
+                      {step.icon}
+                    </div>
+                  </div>
 
-                    <p className="mt-3 text-sm leading-6 text-slate-400">
-                      {description}
-                    </p>
-                  </article>
-                ),
-              )}
-            </div>
-          </div>
-        </section>
-
-        <section
-          id="sectors"
-          className="mx-auto max-w-6xl scroll-mt-24 px-4 py-16 md:px-6 md:py-20"
-        >
-          <h2 className="text-2xl font-bold md:text-3xl">
-            Built for operationally intensive sectors
-          </h2>
-
-          <p className="mt-4 max-w-3xl leading-7 text-slate-300">
-            Designed for organisations where frontline workforce
-            compliance, document expiry tracking and audit readiness are
-            part of daily operations.
-          </p>
-
-          <div className="mt-8 grid gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-3">
-            {sectors.map((sector) => (
-              <div
-                key={sector}
-                className="rounded-2xl border border-slate-800 bg-slate-900 p-5"
-              >
-                {sector}
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="bg-slate-900/50 py-16 md:py-20">
-          <div className="mx-auto max-w-6xl px-4 md:px-6">
-            <h2 className="text-center text-2xl font-bold md:text-3xl">
-              Built from conversations with UK employers
-            </h2>
-
-            <p className="mx-auto mt-4 max-w-3xl text-center leading-7 text-slate-300">
-              Trustera is being shaped through conversations with HR,
-              operations, compliance, security, facilities, cleaning,
-              hospitality and frontline workforce professionals across
-              the UK.
-            </p>
-
-            <div className="mt-8 grid gap-5 md:grid-cols-3">
-              {discoveryInsights.map(([title, description]) => (
-                <article
-                  key={title}
-                  className="rounded-2xl border border-slate-800 bg-slate-950 p-5"
-                >
-                  <h3 className="font-semibold text-white">
-                    {title}
+                  <h3 className="text-lg font-semibold">
+                    {step.title}
                   </h3>
 
                   <p className="mt-3 text-sm leading-6 text-slate-400">
-                    {description}
+                    {step.description}
                   </p>
                 </article>
               ))}
@@ -573,9 +725,211 @@ export default function TrusteraLandingPage() {
           </div>
         </section>
 
-        <section className="mx-auto max-w-6xl px-4 py-16 md:px-6 md:py-20">
-          <h2 className="text-center text-2xl font-bold md:text-3xl">
-            Early access options for growing teams
+        <section
+          id="product"
+          className="mx-auto max-w-6xl scroll-mt-24 px-4 py-16 md:px-6 md:py-24"
+        >
+          <div className="mx-auto max-w-3xl text-center">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-400">
+              Inside Trustera
+            </p>
+
+            <h2 className="mt-3 text-3xl font-bold md:text-4xl">
+              One platform for workforce compliance visibility
+            </h2>
+
+            <p className="mt-4 leading-7 text-slate-300">
+              Explore the main Trustera workflows used to manage
+              workers, documents, expiry alerts and audit activity.
+            </p>
+          </div>
+
+          <div className="-mx-4 mt-10 overflow-x-auto px-4">
+            <div className="flex min-w-max justify-start gap-3 md:justify-center">
+              {productScreens.map((screen) => {
+                const isActive =
+                  screen.id === activeProductScreen
+
+                return (
+                  <button
+                    key={screen.id}
+                    type="button"
+                    onClick={() =>
+                      setActiveProductScreen(screen.id)
+                    }
+                    aria-pressed={isActive}
+                    className={`min-h-[48px] rounded-xl px-5 py-3 text-sm font-semibold transition ${
+                      isActive
+                        ? 'bg-blue-600 text-white'
+                        : 'border border-slate-700 bg-slate-900 text-slate-300 hover:border-blue-500'
+                    }`}
+                  >
+                    {screen.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <motion.div
+            key={selectedProductScreen.id}
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35 }}
+            className="mt-8 overflow-hidden rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl"
+          >
+            <div className="border-b border-slate-800 p-6 md:p-8">
+              <h3 className="text-2xl font-bold md:text-3xl">
+                {selectedProductScreen.title}
+              </h3>
+
+              <p className="mt-3 max-w-3xl leading-7 text-slate-400">
+                {selectedProductScreen.description}
+              </p>
+            </div>
+
+            <div className="bg-slate-950 p-3 md:p-6">
+              {!imageError ? (
+                <a
+                  href={selectedProductScreen.image}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block overflow-hidden rounded-2xl border border-slate-800 bg-slate-950"
+                  aria-label={`Open full-size ${selectedProductScreen.label} screenshot`}
+                >
+                  <img
+                    src={selectedProductScreen.image}
+                    alt={selectedProductScreen.alt}
+                    loading={
+                      selectedProductScreen.id === 'dashboard'
+                        ? 'eager'
+                        : 'lazy'
+                    }
+                    decoding="async"
+                    fetchPriority={
+                      selectedProductScreen.id === 'dashboard'
+                        ? 'high'
+                        : 'auto'
+                    }
+                    onError={() => setImageError(true)}
+                    className="h-auto w-full object-contain"
+                  />
+                </a>
+              ) : (
+                <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-slate-700 bg-slate-900 px-6 text-center text-slate-400">
+                  <div>
+                    <p className="font-semibold text-slate-200">
+                      Screenshot unavailable
+                    </p>
+                    <p className="mt-2 text-sm">
+                      Confirm that{' '}
+                      <code className="text-blue-300">
+                        {selectedProductScreen.image}
+                      </code>{' '}
+                      exists in the public folder.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {!imageError && (
+                <p className="mt-4 text-center text-xs text-slate-500">
+                  Select the image to view the full-resolution product screen.
+                </p>
+              )}
+            </div>
+          </motion.div>
+        </section>
+
+        <section
+          id="sectors"
+          className="scroll-mt-24 bg-slate-900/50 py-16 md:py-24"
+        >
+          <div className="mx-auto max-w-6xl px-4 md:px-6">
+            <h2 className="text-3xl font-bold md:text-4xl">
+              Built for operationally intensive sectors
+            </h2>
+
+            <p className="mt-4 max-w-3xl leading-7 text-slate-300">
+              Designed for organisations where frontline workforce
+              compliance, document expiry tracking and audit readiness
+              are part of daily operations.
+            </p>
+
+            <div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+              {sectors.map((sector) => (
+                <div
+                  key={sector}
+                  className="rounded-2xl border border-slate-800 bg-slate-950 p-5"
+                >
+                  {sector}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="border-y border-slate-800 bg-slate-900/30 py-16 md:py-20">
+          <div className="mx-auto max-w-6xl px-4 text-center md:px-6">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-400">
+              Customer discovery
+            </p>
+
+            <h2 className="mt-3 text-3xl font-bold md:text-4xl">
+              Built with input from UK workforce professionals
+            </h2>
+
+            <p className="mx-auto mt-4 max-w-3xl leading-7 text-slate-400">
+              Trustera is being shaped through conversations with
+              people responsible for workforce, compliance and
+              operational records.
+            </p>
+
+            <div className="mt-7 flex flex-wrap justify-center gap-3">
+              {sectors.map((sector) => (
+                <div
+                  key={sector}
+                  className="rounded-full border border-slate-700 bg-slate-950 px-5 py-2 text-sm font-semibold text-slate-300"
+                >
+                  {sector}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="bg-slate-900/50 py-16 md:py-24">
+          <div className="mx-auto max-w-6xl px-4 md:px-6">
+            <h2 className="text-center text-3xl font-bold md:text-4xl">
+              What we are hearing from UK employers
+            </h2>
+
+            <p className="mx-auto mt-4 max-w-3xl text-center leading-7 text-slate-300">
+              Discovery conversations continue to shape the product,
+              priorities and workflows inside Trustera.
+            </p>
+
+            <div className="mt-10 grid gap-5 md:grid-cols-3">
+              {discoveryInsights.map((insight) => (
+                <article
+                  key={insight.title}
+                  className="rounded-3xl border border-slate-800 bg-slate-950 p-6"
+                >
+                  <h3 className="font-semibold text-white">
+                    {insight.title}
+                  </h3>
+
+                  <p className="mt-3 text-sm leading-6 text-slate-400">
+                    {insight.description}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-6xl px-4 py-16 md:px-6 md:py-24">
+          <h2 className="text-center text-3xl font-bold md:text-4xl">
+            Flexible options for growing teams
           </h2>
 
           <p className="mx-auto mt-3 max-w-2xl text-center leading-7 text-slate-400">
@@ -584,33 +938,33 @@ export default function TrusteraLandingPage() {
           </p>
 
           <div className="mx-auto mt-8 grid max-w-md gap-5 md:max-w-none md:grid-cols-3">
-            {plans.map(([title, description]) => (
+            {plans.map((plan) => (
               <article
-                key={title}
+                key={plan.title}
                 className="rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center"
               >
                 <h3 className="text-xl font-semibold">
-                  {title}
+                  {plan.title}
                 </h3>
 
                 <p className="mt-4 min-h-[48px] leading-6 text-slate-400">
-                  {description}
+                  {plan.description}
                 </p>
 
                 <a
                   href="#contact"
-                  className="mt-6 inline-block w-full rounded-2xl bg-blue-600 px-4 py-3 font-semibold transition hover:bg-blue-500"
+                  className="mt-6 inline-flex min-h-[48px] w-full items-center justify-center rounded-2xl bg-blue-600 px-4 py-3 font-semibold transition hover:bg-blue-500"
                 >
-                  Request Early Access
+                  Book a Demo
                 </a>
               </article>
             ))}
           </div>
         </section>
 
-        <section className="overflow-hidden bg-slate-900/50 py-16 md:py-20">
+        <section className="overflow-hidden bg-slate-900/50 py-16 md:py-24">
           <div className="mx-auto max-w-6xl px-4 md:px-6">
-            <h2 className="text-2xl font-bold md:text-3xl">
+            <h2 className="text-3xl font-bold md:text-4xl">
               Built with security and accountability in mind
             </h2>
 
@@ -635,75 +989,76 @@ export default function TrusteraLandingPage() {
 
         <section
           id="contact"
-          className="mx-auto max-w-4xl scroll-mt-24 px-4 py-16 text-center md:px-6 md:py-20"
+          className="mx-auto max-w-4xl scroll-mt-24 px-4 py-16 text-center md:px-6 md:py-24"
         >
           <h2 className="text-3xl font-bold md:text-4xl">
-            Join the early access programme
+            Book a Trustera demo
           </h2>
 
-          <p className="mt-4 leading-7 text-slate-300">
-            Be among the first UK businesses helping shape a modern
-            workforce compliance platform.
+          <p className="mx-auto mt-4 max-w-2xl leading-7 text-slate-300">
+            Tell us about your organisation and current compliance
+            process. We will contact you to arrange a suitable
+            demonstration.
           </p>
 
           <form
             onSubmit={handleSubmit}
-            className="mx-auto mt-8 max-w-2xl rounded-3xl border border-slate-800 bg-slate-900/60 p-6 text-left backdrop-blur"
+            className="mx-auto mt-8 max-w-2xl rounded-3xl border border-slate-800 bg-slate-900/60 p-6 text-left backdrop-blur md:p-8"
             noValidate
           >
             <div className="grid gap-5">
               <div>
                 <label
-                  htmlFor="early-access-name"
+                  htmlFor="demo-name"
                   className="mb-2 block text-sm font-semibold"
                 >
                   Name *
                 </label>
 
                 <input
-                  id="early-access-name"
+                  id="demo-name"
                   type="text"
                   name="name"
                   value={formData.name}
                   onChange={handleChange}
                   autoComplete="name"
                   disabled={submitting}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="min-h-[48px] w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-base outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                   placeholder="Your name"
                 />
               </div>
 
               <div>
                 <label
-                  htmlFor="early-access-company"
+                  htmlFor="demo-company"
                   className="mb-2 block text-sm font-semibold"
                 >
                   Company *
                 </label>
 
                 <input
-                  id="early-access-company"
+                  id="demo-company"
                   type="text"
                   name="company"
                   value={formData.company}
                   onChange={handleChange}
                   autoComplete="organization"
                   disabled={submitting}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="min-h-[48px] w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-base outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                   placeholder="Company name"
                 />
               </div>
 
               <div>
                 <label
-                  htmlFor="early-access-email"
+                  htmlFor="demo-email"
                   className="mb-2 block text-sm font-semibold"
                 >
                   Work email *
                 </label>
 
                 <input
-                  id="early-access-email"
+                  id="demo-email"
                   type="email"
                   name="email"
                   value={formData.email}
@@ -711,26 +1066,26 @@ export default function TrusteraLandingPage() {
                   autoComplete="email"
                   inputMode="email"
                   disabled={submitting}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="min-h-[48px] w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-base outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                   placeholder="you@company.com"
                 />
               </div>
 
               <div>
                 <label
-                  htmlFor="early-access-industry"
+                  htmlFor="demo-industry"
                   className="mb-2 block text-sm font-semibold"
                 >
                   Industry *
                 </label>
 
                 <select
-                  id="early-access-industry"
+                  id="demo-industry"
                   name="industry"
                   value={formData.industry}
                   onChange={handleChange}
                   disabled={submitting}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="min-h-[48px] w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-base outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <option value="">Select industry</option>
                   <option value="Security">Security</option>
@@ -739,28 +1094,32 @@ export default function TrusteraLandingPage() {
                   </option>
                   <option value="Cleaning">Cleaning</option>
                   <option value="Care Homes">Care Homes</option>
-                  <option value="Hospitality">Hospitality</option>
-                  <option value="Warehousing">Warehousing</option>
+                  <option value="Hospitality">
+                    Hospitality
+                  </option>
+                  <option value="Warehousing">
+                    Warehousing
+                  </option>
                   <option value="Other">Other</option>
                 </select>
               </div>
 
               <div>
                 <label
-                  htmlFor="early-access-challenge"
+                  htmlFor="demo-challenge"
                   className="mb-2 block text-sm font-semibold"
                 >
                   Biggest workforce or compliance challenge?
                 </label>
 
                 <textarea
-                  id="early-access-challenge"
+                  id="demo-challenge"
                   name="challenge"
                   value={formData.challenge}
                   onChange={handleChange}
                   rows={4}
                   disabled={submitting}
-                  className="w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-base outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                   placeholder="Tell us what you currently struggle with..."
                 />
               </div>
@@ -786,11 +1145,11 @@ export default function TrusteraLandingPage() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="rounded-2xl bg-blue-600 px-6 py-3 font-semibold shadow-lg shadow-blue-600/30 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex min-h-[48px] items-center justify-center rounded-2xl bg-blue-600 px-6 py-3 font-semibold shadow-lg shadow-blue-600/30 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting
                   ? 'Submitting...'
-                  : 'Request Early Access'}
+                  : 'Request Demo'}
               </button>
             </div>
           </form>
@@ -807,8 +1166,8 @@ export default function TrusteraLandingPage() {
         </section>
 
         <section className="mx-auto max-w-6xl px-4 pb-16 md:px-6">
-          <div className="rounded-3xl border border-slate-800 bg-gradient-to-r from-blue-600/20 to-cyan-500/10 p-8 text-center">
-            <h2 className="text-2xl font-bold md:text-3xl">
+          <div className="rounded-3xl border border-slate-800 bg-gradient-to-r from-blue-600/20 to-cyan-500/10 p-8 text-center md:p-12">
+            <h2 className="text-3xl font-bold md:text-4xl">
               Stop chasing compliance documents.
             </h2>
 
@@ -816,17 +1175,24 @@ export default function TrusteraLandingPage() {
               Start managing workforce compliance from one place.
             </p>
 
-            <div className="mt-6 flex flex-wrap justify-center gap-4">
+            <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row sm:flex-wrap">
               <a
                 href="#contact"
-                className="inline-block rounded-2xl bg-blue-600 px-6 py-3 font-semibold shadow-lg shadow-blue-600/30 transition hover:bg-blue-500"
+                className="inline-flex min-h-[48px] w-full items-center justify-center rounded-2xl bg-blue-600 px-6 py-3 font-semibold shadow-lg shadow-blue-600/30 transition hover:bg-blue-500 sm:w-auto"
               >
-                Request Early Access
+                Book a Demo
+              </a>
+
+              <a
+                href="#product"
+                className="inline-flex min-h-[48px] w-full items-center justify-center rounded-2xl border border-slate-700 px-6 py-3 font-semibold transition hover:border-blue-500 sm:w-auto"
+              >
+                See Trustera in Action
               </a>
 
               <Link
                 to="/login"
-                className="inline-block rounded-2xl border border-slate-700 px-6 py-3 font-semibold transition hover:border-blue-500"
+                className="inline-flex min-h-[48px] w-full items-center justify-center rounded-2xl border border-slate-700 px-6 py-3 font-semibold transition hover:border-blue-500 sm:w-auto"
               >
                 Sign in
               </Link>
@@ -856,10 +1222,17 @@ export default function TrusteraLandingPage() {
             </a>
 
             <a
+              href="#product"
+              className="transition hover:text-white"
+            >
+              Product
+            </a>
+
+            <a
               href="#contact"
               className="transition hover:text-white"
             >
-              Early Access
+              Book a Demo
             </a>
 
             <Link
@@ -872,18 +1245,18 @@ export default function TrusteraLandingPage() {
         </div>
       </footer>
 
-      <div className="fixed bottom-0 left-0 z-50 w-full border-t border-slate-800 bg-slate-950 p-3 md:hidden">
+      <div className="fixed bottom-0 left-0 z-50 w-full border-t border-slate-800 bg-slate-950/95 p-3 backdrop-blur md:hidden">
         <div className="grid grid-cols-2 gap-3">
           <a
             href="#contact"
-            className="block rounded-xl bg-blue-600 py-3 text-center text-sm font-semibold transition hover:bg-blue-500"
+            className="inline-flex min-h-[48px] items-center justify-center rounded-xl bg-blue-600 px-3 py-3 text-center text-sm font-semibold transition hover:bg-blue-500"
           >
-            Early Access
+            Book a Demo
           </a>
 
           <Link
             to="/login"
-            className="block rounded-xl border border-slate-700 py-3 text-center text-sm font-semibold transition hover:border-blue-500"
+            className="inline-flex min-h-[48px] items-center justify-center rounded-xl border border-slate-700 px-3 py-3 text-center text-sm font-semibold transition hover:border-blue-500"
           >
             Sign in
           </Link>
