@@ -91,6 +91,42 @@ const discoveryInsights = [
   },
 ]
 
+
+const comparisonItems = [
+  {
+    problem: 'Compliance records are spread across multiple systems',
+    problemDescription:
+      'Worker documents, licences, training records and expiry dates are often stored in spreadsheets, inboxes and shared folders.',
+    solution: 'One central compliance workspace',
+    solutionDescription:
+      'Trustera brings workers, documents, expiry dates, alerts and audit activity into one structured platform.',
+  },
+  {
+    problem: 'Teams rely on manual reminders',
+    problemDescription:
+      'Managers repeatedly check spreadsheets and calendars to identify documents that are about to expire.',
+    solution: 'Automatic expiry monitoring',
+    solutionDescription:
+      'Trustera identifies expired and expiring documents and presents them clearly for timely follow-up.',
+  },
+  {
+    problem: 'Audit preparation takes too long',
+    problemDescription:
+      'Evidence must often be gathered from several systems before an audit, client review or compliance check.',
+    solution: 'Audit-ready records',
+    solutionDescription:
+      'Organised worker records, document history and activity logs improve visibility and reduce evidence-gathering time.',
+  },
+  {
+    problem: 'Compliance ownership is unclear',
+    problemDescription:
+      'Teams may not know who uploaded, changed or removed important workforce records.',
+    solution: 'Clear accountability',
+    solutionDescription:
+      'Audit logs record important administrative activity and provide a clearer trail of system actions.',
+  },
+]
+
 const workflow = [
   {
     number: '1',
@@ -128,6 +164,71 @@ const securityFeatures = [
   'Secure document workflows',
   'GDPR-conscious design',
   'Document version history',
+]
+
+
+const roadmapItems = [
+  {
+    title: 'Email Reminders',
+    description:
+      'Scheduled email notifications for expired and soon-to-expire workforce documents.',
+    status: 'Planned',
+    icon: '✉',
+  },
+  {
+    title: 'AI Compliance Assistant',
+    description:
+      'Assisted document review, compliance summaries and guided follow-up workflows.',
+    status: 'Exploring',
+    icon: '✦',
+  },
+  {
+    title: 'Mobile Experience',
+    description:
+      'A mobile-friendly workflow for managers and workers accessing compliance records on the move.',
+    status: 'Planned',
+    icon: '▯',
+  },
+  {
+    title: 'Advanced Compliance Reports',
+    description:
+      'More flexible reporting, scheduled exports and deeper compliance performance insights.',
+    status: 'In development',
+    icon: '▥',
+  },
+]
+
+const faqItems = [
+  {
+    question: 'What is Trustera?',
+    answer:
+      'Trustera is a workforce compliance management platform designed to help organisations organise worker records, monitor document expiry dates, review alerts and maintain audit visibility.',
+  },
+  {
+    question: 'Who is Trustera designed for?',
+    answer:
+      'Trustera is initially focused on UK organisations managing regulated, operational or shift-based workforces, including security, facilities management, cleaning, care, hospitality and warehousing.',
+  },
+  {
+    question: 'Can Trustera monitor document expiry dates?',
+    answer:
+      'Yes. Trustera records document expiry dates and helps users identify records that are valid, expiring soon or already expired.',
+  },
+  {
+    question: 'Can different companies see each other’s data?',
+    answer:
+      'No. Trustera is designed with company-level data separation so authenticated users only access records belonging to their organisation, subject to their assigned permissions.',
+  },
+  {
+    question: 'Is Trustera available to purchase today?',
+    answer:
+      'Trustera is currently being developed and validated with early users. Organisations can request a demonstration or discuss participation in an early access or pilot programme.',
+  },
+  {
+    question: 'Does Trustera replace legal or professional compliance advice?',
+    answer:
+      'No. Trustera helps organisations organise and monitor compliance information, but it does not replace legal advice, regulatory guidance or an organisation’s own compliance responsibilities.',
+  },
 ]
 
 const dashboardStats = [
@@ -348,6 +449,7 @@ export default function TrusteraLandingPage() {
   const [activeProductScreen, setActiveProductScreen] =
     useState('dashboard')
   const [imageError, setImageError] = useState(false)
+  const [openFaqIndex, setOpenFaqIndex] = useState(0)
 
   const selectedProductScreen = useMemo(
     () =>
@@ -512,10 +614,31 @@ export default function TrusteraLandingPage() {
               </a>
 
               <a
+                href="#solutions"
+                className="transition hover:text-white"
+              >
+                Solutions
+              </a>
+
+              <a
                 href="#sectors"
                 className="transition hover:text-white"
               >
                 Sectors
+              </a>
+
+              <a
+                href="#roadmap"
+                className="transition hover:text-white"
+              >
+                Roadmap
+              </a>
+
+              <a
+                href="#faq"
+                className="transition hover:text-white"
+              >
+                FAQ
               </a>
 
               <a
@@ -973,6 +1096,64 @@ export default function TrusteraLandingPage() {
         </section>
 
         <section
+          id="solutions"
+          className="scroll-mt-24 border-y border-slate-800 bg-slate-900/40 py-16 md:py-24"
+        >
+          <div className="mx-auto max-w-6xl px-4 md:px-6">
+            <div className="mx-auto max-w-3xl text-center">
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-400">
+                Problems and solutions
+              </p>
+
+              <h2 className="mt-3 text-3xl font-bold md:text-4xl">
+                Replace fragmented compliance work with one clear workflow
+              </h2>
+
+              <p className="mt-4 leading-7 text-slate-300">
+                Trustera is designed around the recurring problems raised
+                by teams managing workforce documents, expiries and audit
+                evidence.
+              </p>
+            </div>
+
+            <div className="mt-10 grid gap-5 lg:grid-cols-2">
+              {comparisonItems.map((item, index) => (
+                <motion.article
+                  key={item.problem}
+                  initial={{ opacity: 0, y: 18 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, amount: 0.25 }}
+                  transition={{ duration: 0.4, delay: index * 0.06 }}
+                  className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-950"
+                >
+                  <div className="border-b border-red-500/15 bg-red-500/5 p-6">
+                    <div className="flex items-start gap-4">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10 text-red-300">×</div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-red-300">The problem</p>
+                        <h3 className="mt-2 text-lg font-semibold">{item.problem}</h3>
+                        <p className="mt-3 text-sm leading-6 text-slate-400">{item.problemDescription}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-emerald-500/5 p-6">
+                    <div className="flex items-start gap-4">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">✓</div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-300">The Trustera solution</p>
+                        <h3 className="mt-2 text-lg font-semibold">{item.solution}</h3>
+                        <p className="mt-3 text-sm leading-6 text-slate-400">{item.solutionDescription}</p>
+                      </div>
+                    </div>
+                  </div>
+                </motion.article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section
           id="sectors"
           className="scroll-mt-24 bg-slate-900/50 py-16 md:py-24"
         >
@@ -1115,6 +1296,102 @@ export default function TrusteraLandingPage() {
                   {feature}
                 </div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        <section
+          id="roadmap"
+          className="mx-auto max-w-6xl scroll-mt-24 px-4 py-16 md:px-6 md:py-24"
+        >
+          <div className="mx-auto max-w-3xl text-center">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-400">Coming soon</p>
+            <h2 className="mt-3 text-3xl font-bold md:text-4xl">The next stage of Trustera</h2>
+            <p className="mt-4 leading-7 text-slate-300">
+              These planned capabilities are being shaped by customer discovery,
+              pilot feedback and the needs of operational compliance teams.
+            </p>
+          </div>
+
+          <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            {roadmapItems.map((item, index) => (
+              <motion.article
+                key={item.title}
+                initial={{ opacity: 0, y: 18 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.25 }}
+                transition={{ duration: 0.4, delay: index * 0.08 }}
+                className="relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-900 p-6"
+              >
+                <div className="absolute right-0 top-0 h-28 w-28 rounded-full bg-blue-500/10 blur-3xl" />
+                <div className="relative">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-blue-500/20 bg-blue-500/10 text-2xl text-blue-300" aria-hidden="true">{item.icon}</div>
+                    <span className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs font-semibold text-blue-300">{item.status}</span>
+                  </div>
+                  <h3 className="mt-6 text-xl font-semibold">{item.title}</h3>
+                  <p className="mt-3 text-sm leading-6 text-slate-400">{item.description}</p>
+                </div>
+              </motion.article>
+            ))}
+          </div>
+
+          <p className="mt-6 text-center text-xs leading-5 text-slate-500">
+            Roadmap items are indicative and may change as Trustera continues to develop.
+          </p>
+        </section>
+
+        <section
+          id="faq"
+          className="scroll-mt-24 border-y border-slate-800 bg-slate-900/40 py-16 md:py-24"
+        >
+          <div className="mx-auto max-w-4xl px-4 md:px-6">
+            <div className="text-center">
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-400">Frequently asked questions</p>
+              <h2 className="mt-3 text-3xl font-bold md:text-4xl">Questions about Trustera</h2>
+              <p className="mx-auto mt-4 max-w-2xl leading-7 text-slate-300">
+                Learn how the platform works, who it is for and what to expect during early access.
+              </p>
+            </div>
+
+            <div className="mt-10 space-y-4">
+              {faqItems.map((item, index) => {
+                const isOpen = openFaqIndex === index
+                const answerId = `faq-answer-${index}`
+                const buttonId = `faq-button-${index}`
+
+                return (
+                  <article key={item.question} className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
+                    <h3>
+                      <button
+                        id={buttonId}
+                        type="button"
+                        onClick={() => setOpenFaqIndex(isOpen ? -1 : index)}
+                        aria-expanded={isOpen}
+                        aria-controls={answerId}
+                        className="flex min-h-[64px] w-full items-center justify-between gap-4 px-5 py-4 text-left font-semibold transition hover:bg-slate-900 md:px-6"
+                      >
+                        <span>{item.question}</span>
+                        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-700 text-blue-300 transition ${isOpen ? 'rotate-45 bg-blue-500/10' : ''}`} aria-hidden="true">+</span>
+                      </button>
+                    </h3>
+
+                    {isOpen && (
+                      <motion.div
+                        id={answerId}
+                        role="region"
+                        aria-labelledby={buttonId}
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        transition={{ duration: 0.25 }}
+                        className="border-t border-slate-800"
+                      >
+                        <p className="px-5 py-5 leading-7 text-slate-400 md:px-6">{item.answer}</p>
+                      </motion.div>
+                    )}
+                  </article>
+                )
+              })}
             </div>
           </div>
         </section>
