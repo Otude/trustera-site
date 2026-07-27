@@ -3,9 +3,45 @@ import toast from 'react-hot-toast'
 
 import { supabase } from '../supabase'
 
+const STATUS_META = {
+  unread: {
+    label: 'Unread',
+    description: 'Requires your attention',
+    icon: '✉',
+    accent: '#2563eb',
+    background: '#172554',
+    foreground: '#dbeafe',
+  },
+  read: {
+    label: 'Read',
+    description: 'Already reviewed',
+    icon: '✓',
+    accent: '#16a34a',
+    background: '#052e16',
+    foreground: '#bbf7d0',
+  },
+  expired: {
+    label: 'Expired',
+    description: 'Requires immediate action',
+    icon: '!',
+    accent: '#dc2626',
+    background: '#450a0a',
+    foreground: '#fecaca',
+  },
+  'expiring soon': {
+    label: 'Expiring Soon',
+    description: 'Within 30 days',
+    icon: '◷',
+    accent: '#d97706',
+    background: '#451a03',
+    foreground: '#fde68a',
+  },
+}
+
 export default function Notifications({ profile }) {
   const [notifications, setNotifications] = useState([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
 
@@ -20,11 +56,14 @@ export default function Notifications({ profile }) {
       if (!companyId) {
         setNotifications([])
         setLoading(false)
+        setRefreshing(false)
         return
       }
 
       if (showLoading) {
         setLoading(true)
+      } else {
+        setRefreshing(true)
       }
 
       try {
@@ -57,9 +96,8 @@ export default function Notifications({ profile }) {
         console.error('Unable to load notifications:', error)
         toast.error(error?.message || 'Unable to load notifications.')
       } finally {
-        if (showLoading) {
-          setLoading(false)
-        }
+        setLoading(false)
+        setRefreshing(false)
       }
     },
     [companyId],
@@ -92,9 +130,9 @@ export default function Notifications({ profile }) {
           ) {
             toast(payload.new.message, {
               icon:
-                payload.new.status === 'expired'
+                normaliseStatus(payload.new.status) === 'expired'
                   ? '🚨'
-                  : payload.new.status === 'expiring soon'
+                  : normaliseStatus(payload.new.status) === 'expiring soon'
                     ? '⚠️'
                     : '🔔',
             })
@@ -297,27 +335,17 @@ export default function Notifications({ profile }) {
       .replaceAll('_', ' ')
   }
 
-  function getStatusStyle(status) {
-    const normalisedStatus = normaliseStatus(status)
-
-    if (normalisedStatus === 'expired') {
-      return {
-        background: '#7f1d1d',
-        color: '#fecaca',
+  function getStatusMeta(status) {
+    return (
+      STATUS_META[normaliseStatus(status)] || {
+        label: normaliseStatus(status) || 'Unknown',
+        description: 'Status unavailable',
+        icon: '•',
+        accent: '#475569',
+        background: '#1e293b',
+        foreground: '#e2e8f0',
       }
-    }
-
-    if (normalisedStatus === 'expiring soon') {
-      return {
-        background: '#78350f',
-        color: '#fde68a',
-      }
-    }
-
-    return {
-      background: '#064e3b',
-      color: '#bbf7d0',
-    }
+    )
   }
 
   function getSeverityStyle(severity) {
@@ -327,6 +355,7 @@ export default function Notifications({ profile }) {
       return {
         background: '#7f1d1d',
         color: '#fecaca',
+        border: '1px solid #991b1b',
       }
     }
 
@@ -334,12 +363,14 @@ export default function Notifications({ profile }) {
       return {
         background: '#78350f',
         color: '#fde68a',
+        border: '1px solid #92400e',
       }
     }
 
     return {
       background: '#1e3a8a',
       color: '#dbeafe',
+      border: '1px solid #1d4ed8',
     }
   }
 
@@ -408,6 +439,14 @@ export default function Notifications({ profile }) {
     })
   }, [filter, notifications, search])
 
+  const activeFilterLabel = useMemo(() => {
+    if (filter === 'all') return 'All notifications'
+    if (filter === 'unread') return 'Unread notifications'
+    if (filter === 'read') return 'Read notifications'
+
+    return getStatusMeta(filter).label
+  }, [filter])
+
   if (!companyId) {
     return (
       <div style={styles.page}>
@@ -423,244 +462,413 @@ export default function Notifications({ profile }) {
     <div style={styles.page}>
       <div style={styles.headerRow}>
         <div>
+          <div style={styles.eyebrow}>COMPLIANCE ALERTS</div>
           <h1 style={styles.pageTitle}>Notification Center</h1>
 
           <p style={styles.subText}>
-            {unreadCount} unread · {readCount} read ·{' '}
-            {notifications.length} total
+            Review expiry warnings, critical document alerts and
+            notification history for your organisation.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={markAllAsRead}
-          style={{
-            ...styles.primaryButton,
-            ...(markingAll || unreadCount === 0
-              ? styles.disabledButton
-              : {}),
-          }}
-          disabled={markingAll || unreadCount === 0}
-        >
-          {markingAll ? 'Marking...' : 'Mark All As Read'}
-        </button>
+        <div style={styles.headerActions}>
+          <button
+            type="button"
+            onClick={() =>
+              fetchNotifications({ showLoading: false })
+            }
+            style={{
+              ...styles.secondaryButton,
+              ...(refreshing ? styles.disabledButton : {}),
+            }}
+            disabled={refreshing}
+          >
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+
+          <button
+            type="button"
+            onClick={markAllAsRead}
+            style={{
+              ...styles.primaryButton,
+              ...(markingAll || unreadCount === 0
+                ? styles.disabledButton
+                : {}),
+            }}
+            disabled={markingAll || unreadCount === 0}
+          >
+            {markingAll ? 'Marking...' : 'Mark All As Read'}
+          </button>
+        </div>
       </div>
 
       <div style={styles.statsGrid}>
-        <StatCard title="Unread" value={unreadCount} />
-        <StatCard title="Read" value={readCount} />
-        <StatCard title="Expired" value={expiredCount} />
         <StatCard
-          title="Expiring Soon"
+          meta={STATUS_META.unread}
+          value={unreadCount}
+          active={filter === 'unread'}
+          onClick={() => setFilter('unread')}
+        />
+
+        <StatCard
+          meta={STATUS_META.read}
+          value={readCount}
+          active={filter === 'read'}
+          onClick={() => setFilter('read')}
+        />
+
+        <StatCard
+          meta={STATUS_META.expired}
+          value={expiredCount}
+          active={filter === 'expired'}
+          onClick={() => setFilter('expired')}
+        />
+
+        <StatCard
+          meta={STATUS_META['expiring soon']}
           value={expiringSoonCount}
+          active={filter === 'expiring soon'}
+          onClick={() => setFilter('expiring soon')}
         />
       </div>
 
-      <div style={styles.filterRow}>
-        <input
-          type="text"
-          placeholder="Search notifications..."
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          style={styles.searchInput}
-        />
+      <div style={styles.legendCard}>
+        <div>
+          <h2 style={styles.sectionTitle}>Notification status guide</h2>
+          <p style={styles.sectionText}>
+            Colours indicate whether a notification is unread,
+            reviewed, expired or approaching expiry.
+          </p>
+        </div>
 
-        <select
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          style={styles.filterSelect}
-        >
-          <option value="all">All Notifications</option>
-          <option value="unread">Unread</option>
-          <option value="read">Read</option>
-          <option value="expired">Expired</option>
-          <option value="expiring soon">Expiring Soon</option>
-        </select>
+        <div style={styles.legendGrid}>
+          {Object.entries(STATUS_META).map(([key, meta]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setFilter(key)}
+              style={{
+                ...styles.legendItem,
+                ...(filter === key ? styles.legendItemActive : {}),
+              }}
+            >
+              <span
+                style={{
+                  ...styles.legendDot,
+                  background: meta.accent,
+                }}
+              />
+
+              <span>
+                <strong style={styles.legendLabel}>
+                  {meta.label}
+                </strong>
+                <span style={styles.legendDescription}>
+                  {meta.description}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={styles.filterCard}>
+        <div style={styles.filterHeader}>
+          <div>
+            <h2 style={styles.sectionTitle}>Notification history</h2>
+            <p style={styles.sectionText}>
+              Showing {filteredNotifications.length} of{' '}
+              {notifications.length} records · {activeFilterLabel}
+            </p>
+          </div>
+
+          {(filter !== 'all' || search) && (
+            <button
+              type="button"
+              onClick={() => {
+                setFilter('all')
+                setSearch('')
+              }}
+              style={styles.clearButton}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+
+        <div style={styles.filterRow}>
+          <div style={styles.searchWrapper}>
+            <span style={styles.searchIcon}>⌕</span>
+
+            <input
+              type="text"
+              placeholder="Search by worker, document, status or message..."
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              style={styles.searchInput}
+            />
+          </div>
+
+          <select
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            style={styles.filterSelect}
+          >
+            <option value="all">All Notifications</option>
+            <option value="unread">Unread</option>
+            <option value="read">Read</option>
+            <option value="expired">Expired</option>
+            <option value="expiring soon">Expiring Soon</option>
+          </select>
+        </div>
       </div>
 
       {loading ? (
         <div style={styles.emptyState}>
-          Loading notifications...
+          <div style={styles.emptyIcon}>◌</div>
+          <strong>Loading notifications...</strong>
         </div>
       ) : filteredNotifications.length === 0 ? (
         <div style={styles.emptyState}>
-          No matching notifications found.
+          <div style={styles.emptyIcon}>✓</div>
+          <strong>No matching notifications found.</strong>
+          <span style={styles.emptySubText}>
+            Try changing the selected filter or search term.
+          </span>
         </div>
       ) : (
-        <div style={styles.tableWrapper}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>Read</th>
-                <th style={styles.th}>Message</th>
-                <th style={styles.th}>Worker</th>
-                <th style={styles.th}>Document</th>
-                <th style={styles.th}>Expiry Date</th>
-                <th style={styles.th}>Status</th>
-                <th style={styles.th}>Severity</th>
-                <th style={styles.th}>Logged At</th>
-                <th style={styles.th}>Read At</th>
-                <th style={styles.th}>Action</th>
-              </tr>
-            </thead>
+        <div style={styles.tableCard}>
+          <div style={styles.tableWrapper}>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={styles.th}>Read</th>
+                  <th style={styles.th}>Message</th>
+                  <th style={styles.th}>Worker</th>
+                  <th style={styles.th}>Document</th>
+                  <th style={styles.th}>Expiry Date</th>
+                  <th style={styles.th}>Status</th>
+                  <th style={styles.th}>Severity</th>
+                  <th style={styles.th}>Logged At</th>
+                  <th style={styles.th}>Read At</th>
+                  <th style={styles.th}>Action</th>
+                </tr>
+              </thead>
 
-            <tbody>
-              {filteredNotifications.map((item) => {
-                const itemStatus = normaliseStatus(item.status)
-                const isMarking = markingId === item.id
-                const isDeleting = deletingId === item.id
+              <tbody>
+                {filteredNotifications.map((item) => {
+                  const itemStatus = normaliseStatus(item.status)
+                  const statusMeta = getStatusMeta(itemStatus)
+                  const isMarking = markingId === item.id
+                  const isDeleting = deletingId === item.id
 
-                return (
-                  <tr
-                    key={item.id}
-                    style={
-                      item.is_read
-                        ? styles.readRow
-                        : styles.unreadRow
-                    }
-                  >
-                    <td style={styles.td}>
-                      <span
-                        style={{
-                          ...styles.badge,
-                          ...(item.is_read
-                            ? styles.readBadge
-                            : styles.unreadBadge),
-                        }}
-                      >
-                        {item.is_read ? 'read' : 'unread'}
-                      </span>
-                    </td>
+                  return (
+                    <tr
+                      key={item.id}
+                      style={
+                        item.is_read
+                          ? styles.readRow
+                          : styles.unreadRow
+                      }
+                    >
+                      <td style={styles.td}>
+                        <span
+                          style={{
+                            ...styles.badge,
+                            ...(item.is_read
+                              ? styles.readBadge
+                              : styles.unreadBadge),
+                          }}
+                        >
+                          <span style={styles.badgeIcon}>
+                            {item.is_read ? '✓' : '●'}
+                          </span>
+                          {item.is_read ? 'Read' : 'Unread'}
+                        </span>
+                      </td>
 
-                    <td style={styles.td}>
-                      {item.message || '-'}
-                    </td>
+                      <td style={styles.messageCell}>
+                        <div style={styles.messageContent}>
+                          <span
+                            style={{
+                              ...styles.messageIndicator,
+                              background: statusMeta.accent,
+                            }}
+                          />
 
-                    <td style={styles.td}>
-                      {item.worker_name || '-'}
-                    </td>
+                          <span>{item.message || '-'}</span>
+                        </div>
+                      </td>
 
-                    <td style={styles.td}>
-                      {item.document_type || '-'}
-                    </td>
+                      <td style={styles.td}>
+                        {item.worker_name || '-'}
+                      </td>
 
-                    <td style={styles.td}>
-                      {item.expiry_date || '-'}
-                    </td>
+                      <td style={styles.td}>
+                        {item.document_type || '-'}
+                      </td>
 
-                    <td style={styles.td}>
-                      <span
-                        style={{
-                          ...styles.badge,
-                          ...getStatusStyle(itemStatus),
-                        }}
-                      >
-                        {itemStatus || 'unknown'}
-                      </span>
-                    </td>
+                      <td style={styles.td}>
+                        {item.expiry_date || '-'}
+                      </td>
 
-                    <td style={styles.td}>
-                      <span
-                        style={{
-                          ...styles.badge,
-                          ...getSeverityStyle(item.severity),
-                        }}
-                      >
-                        {item.severity || 'normal'}
-                      </span>
-                    </td>
+                      <td style={styles.td}>
+                        <span
+                          style={{
+                            ...styles.badge,
+                            background: statusMeta.background,
+                            color: statusMeta.foreground,
+                            border: `1px solid ${statusMeta.accent}`,
+                          }}
+                        >
+                          <span style={styles.badgeIcon}>
+                            {statusMeta.icon}
+                          </span>
+                          {statusMeta.label}
+                        </span>
+                      </td>
 
-                    <td style={styles.td}>
-                      {formatDate(item.sent_at)}
-                    </td>
+                      <td style={styles.td}>
+                        <span
+                          style={{
+                            ...styles.badge,
+                            ...getSeverityStyle(item.severity),
+                          }}
+                        >
+                          {item.severity || 'normal'}
+                        </span>
+                      </td>
 
-                    <td style={styles.td}>
-                      {formatDate(item.read_at)}
-                    </td>
+                      <td style={styles.td}>
+                        {formatDate(item.sent_at)}
+                      </td>
 
-                    <td style={styles.td}>
-                      <div style={styles.actionButtons}>
-                        {!item.is_read && (
+                      <td style={styles.td}>
+                        {formatDate(item.read_at)}
+                      </td>
+
+                      <td style={styles.td}>
+                        <div style={styles.actionButtons}>
+                          {!item.is_read && (
+                            <button
+                              type="button"
+                              onClick={() => markAsRead(item)}
+                              style={{
+                                ...styles.readButton,
+                                ...(isMarking
+                                  ? styles.disabledButton
+                                  : {}),
+                              }}
+                              disabled={isMarking || isDeleting}
+                            >
+                              {isMarking
+                                ? 'Marking...'
+                                : 'Mark Read'}
+                            </button>
+                          )}
+
                           <button
                             type="button"
-                            onClick={() => markAsRead(item)}
+                            onClick={() =>
+                              deleteNotification(item)
+                            }
                             style={{
-                              ...styles.readButton,
-                              ...(isMarking
+                              ...styles.deleteButton,
+                              ...(isDeleting
                                 ? styles.disabledButton
                                 : {}),
                             }}
-                            disabled={isMarking || isDeleting}
+                            disabled={isDeleting || isMarking}
                           >
-                            {isMarking
-                              ? 'Marking...'
-                              : 'Mark Read'}
+                            {isDeleting
+                              ? 'Deleting...'
+                              : 'Delete'}
                           </button>
-                        )}
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            deleteNotification(item)
-                          }
-                          style={{
-                            ...styles.deleteButton,
-                            ...(isDeleting
-                              ? styles.disabledButton
-                              : {}),
-                          }}
-                          disabled={isDeleting || isMarking}
-                        >
-                          {isDeleting
-                            ? 'Deleting...'
-                            : 'Delete'}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
   )
 }
 
-function StatCard({ title, value }) {
+function StatCard({ meta, value, active, onClick }) {
   return (
-    <div style={styles.statCard}>
-      <h2 style={styles.statValue}>{value}</h2>
-      <p style={styles.statTitle}>{title}</p>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        ...styles.statCard,
+        ...(active ? styles.statCardActive : {}),
+      }}
+    >
+      <span
+        style={{
+          ...styles.statIcon,
+          background: meta.accent,
+        }}
+      >
+        {meta.icon}
+      </span>
+
+      <span style={styles.statText}>
+        <strong style={styles.statValue}>{value}</strong>
+        <span style={styles.statTitle}>{meta.label}</span>
+        <span style={styles.statDescription}>
+          {meta.description}
+        </span>
+      </span>
+    </button>
   )
 }
 
 const styles = {
   page: {
-    padding: '40px',
+    padding: '32px',
     color: '#ffffff',
     background: '#020617',
     minHeight: '100vh',
   },
 
+  eyebrow: {
+    marginBottom: '8px',
+    color: '#60a5fa',
+    fontSize: '12px',
+    fontWeight: 800,
+    letterSpacing: '0.14em',
+  },
+
   pageTitle: {
     marginTop: 0,
     marginBottom: 0,
+    fontSize: '28px',
   },
 
   headerRow: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flexWrap: 'wrap',
     gap: '20px',
     marginBottom: '24px',
   },
 
+  headerActions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '12px',
+  },
+
   subText: {
+    maxWidth: '720px',
     color: '#94a3b8',
+    lineHeight: 1.65,
     marginTop: '8px',
     marginBottom: 0,
   },
@@ -668,45 +876,187 @@ const styles = {
   statsGrid: {
     display: 'grid',
     gridTemplateColumns:
-      'repeat(auto-fit, minmax(180px, 1fr))',
+      'repeat(auto-fit, minmax(220px, 1fr))',
     gap: '16px',
     marginBottom: '24px',
   },
 
   statCard: {
-    background: '#0f172a',
-    border: '1px solid #1e293b',
-    borderRadius: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '14px',
+    width: '100%',
+    minHeight: '112px',
     padding: '18px',
+    textAlign: 'left',
+    background: '#0f172a',
+    color: '#ffffff',
+    border: '1px solid #1e293b',
+    borderRadius: '14px',
+    cursor: 'pointer',
+    transition: 'border-color 0.2s ease, transform 0.2s ease',
+  },
+
+  statCardActive: {
+    border: '1px solid #60a5fa',
+    boxShadow: '0 0 0 1px rgba(96, 165, 250, 0.2)',
+  },
+
+  statIcon: {
+    width: '48px',
+    height: '48px',
+    flex: '0 0 48px',
+    display: 'grid',
+    placeItems: 'center',
+    borderRadius: '50%',
+    color: '#ffffff',
+    fontSize: '22px',
+    fontWeight: 800,
+  },
+
+  statText: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
   },
 
   statValue: {
-    marginTop: 0,
-    marginBottom: '8px',
+    fontSize: '22px',
+    lineHeight: 1.1,
   },
 
   statTitle: {
+    marginTop: '4px',
+    fontWeight: 800,
+  },
+
+  statDescription: {
+    marginTop: '3px',
+    color: '#94a3b8',
+    fontSize: '12px',
+  },
+
+  legendCard: {
+    display: 'grid',
+    gridTemplateColumns:
+      'minmax(220px, 0.75fr) minmax(320px, 1.25fr)',
+    gap: '22px',
+    alignItems: 'center',
+    marginBottom: '24px',
+    padding: '20px',
+    background: '#0f172a',
+    border: '1px solid #1e293b',
+    borderRadius: '14px',
+  },
+
+  sectionTitle: {
     margin: 0,
+    fontSize: '18px',
+  },
+
+  sectionText: {
+    marginTop: '6px',
+    marginBottom: 0,
+    color: '#94a3b8',
+    lineHeight: 1.55,
+  },
+
+  legendGrid: {
+    display: 'grid',
+    gridTemplateColumns:
+      'repeat(auto-fit, minmax(150px, 1fr))',
+    gap: '10px',
+  },
+
+  legendItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '11px',
+    textAlign: 'left',
+    background: '#020617',
+    color: '#ffffff',
+    border: '1px solid #334155',
+    borderRadius: '10px',
+    cursor: 'pointer',
+  },
+
+  legendItemActive: {
+    borderColor: '#60a5fa',
+    background: '#0b1730',
+  },
+
+  legendDot: {
+    width: '11px',
+    height: '11px',
+    flex: '0 0 11px',
+    borderRadius: '50%',
+  },
+
+  legendLabel: {
+    display: 'block',
+    fontSize: '13px',
+  },
+
+  legendDescription: {
+    display: 'block',
+    marginTop: '2px',
+    color: '#94a3b8',
+    fontSize: '11px',
+  },
+
+  filterCard: {
+    marginBottom: '18px',
+    padding: '20px',
+    background: '#0f172a',
+    border: '1px solid #1e293b',
+    borderRadius: '14px',
+  },
+
+  filterHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    flexWrap: 'wrap',
+    gap: '14px',
+    marginBottom: '16px',
   },
 
   filterRow: {
     display: 'flex',
     flexWrap: 'wrap',
-    gap: '16px',
-    marginBottom: '24px',
+    gap: '12px',
+  },
+
+  searchWrapper: {
+    position: 'relative',
+    minWidth: '280px',
+    flex: 1,
+  },
+
+  searchIcon: {
+    position: 'absolute',
+    left: '14px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    color: '#94a3b8',
+    fontSize: '18px',
+    pointerEvents: 'none',
   },
 
   searchInput: {
-    minWidth: '260px',
-    flex: 1,
-    padding: '14px',
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '14px 14px 14px 42px',
     borderRadius: '10px',
     border: '1px solid #334155',
     background: '#1e293b',
     color: '#ffffff',
+    fontSize: '14px',
   },
 
   filterSelect: {
+    minWidth: '190px',
     padding: '14px',
     borderRadius: '10px',
     border: '1px solid #334155',
@@ -718,15 +1068,41 @@ const styles = {
     background: '#2563eb',
     color: '#ffffff',
     border: 'none',
-    borderRadius: '8px',
+    borderRadius: '9px',
     padding: '12px 16px',
     cursor: 'pointer',
-    fontWeight: 'bold',
+    fontWeight: 800,
+  },
+
+  secondaryButton: {
+    background: '#1e293b',
+    color: '#ffffff',
+    border: '1px solid #334155',
+    borderRadius: '9px',
+    padding: '12px 16px',
+    cursor: 'pointer',
+    fontWeight: 800,
+  },
+
+  clearButton: {
+    padding: 0,
+    background: 'transparent',
+    color: '#60a5fa',
+    border: 'none',
+    cursor: 'pointer',
+    fontWeight: 700,
   },
 
   disabledButton: {
     cursor: 'not-allowed',
     opacity: 0.6,
+  },
+
+  tableCard: {
+    overflow: 'hidden',
+    background: '#0f172a',
+    border: '1px solid #1e293b',
+    borderRadius: '14px',
   },
 
   tableWrapper: {
@@ -736,22 +1112,47 @@ const styles = {
 
   table: {
     width: '100%',
-    minWidth: '1300px',
+    minWidth: '1420px',
     borderCollapse: 'collapse',
   },
 
   th: {
-    border: '1px solid #334155',
-    padding: '12px',
+    borderBottom: '1px solid #334155',
+    borderRight: '1px solid #334155',
+    padding: '13px',
     background: '#0f172a',
     textAlign: 'left',
     whiteSpace: 'nowrap',
+    fontSize: '13px',
   },
 
   td: {
-    border: '1px solid #334155',
-    padding: '12px',
+    borderBottom: '1px solid #334155',
+    borderRight: '1px solid #334155',
+    padding: '13px',
     verticalAlign: 'middle',
+  },
+
+  messageCell: {
+    minWidth: '340px',
+    borderBottom: '1px solid #334155',
+    borderRight: '1px solid #334155',
+    padding: '13px',
+    verticalAlign: 'middle',
+  },
+
+  messageContent: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '10px',
+    lineHeight: 1.5,
+  },
+
+  messageIndicator: {
+    width: '4px',
+    minHeight: '34px',
+    flex: '0 0 4px',
+    borderRadius: '999px',
   },
 
   unreadRow: {
@@ -760,27 +1161,35 @@ const styles = {
 
   readRow: {
     background: '#020617',
-    opacity: 0.78,
+    opacity: 0.82,
   },
 
   badge: {
-    display: 'inline-block',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
     padding: '6px 10px',
     borderRadius: '999px',
     fontSize: '12px',
-    fontWeight: 'bold',
+    fontWeight: 800,
     textTransform: 'capitalize',
     whiteSpace: 'nowrap',
+  },
+
+  badgeIcon: {
+    lineHeight: 1,
   },
 
   unreadBadge: {
     background: '#1d4ed8',
     color: '#dbeafe',
+    border: '1px solid #2563eb',
   },
 
   readBadge: {
     background: '#334155',
     color: '#cbd5e1',
+    border: '1px solid #475569',
   },
 
   actionButtons: {
@@ -794,9 +1203,9 @@ const styles = {
     border: 'none',
     color: '#ffffff',
     padding: '8px 12px',
-    borderRadius: '6px',
+    borderRadius: '7px',
     cursor: 'pointer',
-    fontWeight: 'bold',
+    fontWeight: 800,
   },
 
   deleteButton: {
@@ -804,18 +1213,39 @@ const styles = {
     border: 'none',
     color: '#ffffff',
     padding: '8px 12px',
-    borderRadius: '6px',
+    borderRadius: '7px',
     cursor: 'pointer',
-    fontWeight: 'bold',
+    fontWeight: 800,
   },
 
   emptyState: {
-    padding: '28px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '42px 28px',
     border: '1px solid #334155',
-    borderRadius: '12px',
+    borderRadius: '14px',
     background: '#0f172a',
-    color: '#94a3b8',
+    color: '#cbd5e1',
     textAlign: 'center',
+  },
+
+  emptyIcon: {
+    width: '48px',
+    height: '48px',
+    display: 'grid',
+    placeItems: 'center',
+    borderRadius: '50%',
+    background: '#1e293b',
+    color: '#60a5fa',
+    fontSize: '24px',
+    fontWeight: 800,
+  },
+
+  emptySubText: {
+    color: '#94a3b8',
+    fontSize: '13px',
   },
 
   errorPanel: {

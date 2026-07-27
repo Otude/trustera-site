@@ -22,6 +22,30 @@ import { supabase } from '../supabase'
 const EXPIRY_WARNING_DAYS = 30
 const CHART_COLORS = ['#22c55e', '#f59e0b', '#ef4444']
 
+const STATUS_META = {
+  valid: {
+    label: 'Valid',
+    colour: '#22c55e',
+    background: '#052e16',
+    description: 'Current and outside the warning window',
+    icon: '✓',
+  },
+  expiringSoon: {
+    label: 'Expiring Soon',
+    colour: '#f59e0b',
+    background: '#451a03',
+    description: `Due within ${EXPIRY_WARNING_DAYS} days`,
+    icon: '◷',
+  },
+  expired: {
+    label: 'Expired',
+    colour: '#ef4444',
+    background: '#450a0a',
+    description: 'Past the recorded expiry date',
+    icon: '!',
+  },
+}
+
 export default function Dashboard({ profile }) {
   const [workers, setWorkers] = useState([])
   const [documents, setDocuments] = useState([])
@@ -1017,57 +1041,135 @@ export default function Dashboard({ profile }) {
         <StatCard
           title="Total Workers"
           value={filteredWorkers.length}
+          icon="◉"
+          accent="#3b82f6"
+          helper="People in the current view"
         />
 
         <StatCard
           title="Active Workers"
           value={activeWorkers.length}
+          icon="✓"
+          accent="#22c55e"
+          helper="Currently active"
         />
 
         <StatCard
           title="Inactive Workers"
           value={inactiveWorkers.length}
+          icon="–"
+          accent="#94a3b8"
+          helper="Currently inactive"
         />
 
         <StatCard
           title="Total Documents"
           value={filteredDocuments.length}
+          icon="▤"
+          accent="#60a5fa"
+          helper="Records matching the filters"
         />
 
         <StatCard
           title="Valid Documents"
           value={healthyDocuments.length}
+          icon={STATUS_META.valid.icon}
+          accent={STATUS_META.valid.colour}
+          helper="Current and not expiring soon"
         />
 
         <StatCard
           title="Expired Docs"
           value={expiredDocuments.length}
+          icon={STATUS_META.expired.icon}
+          accent={STATUS_META.expired.colour}
+          helper="Require immediate attention"
         />
 
         <StatCard
           title="Expiring Soon"
           value={expiringSoonDocuments.length}
+          icon={STATUS_META.expiringSoon.icon}
+          accent={STATUS_META.expiringSoon.colour}
+          helper={`Due within ${EXPIRY_WARNING_DAYS} days`}
         />
 
         <StatCard
           title="Compliance Score"
           value={`${complianceScore}%`}
+          icon="↗"
+          accent="#a855f7"
+          helper="Documents not yet expired"
         />
+      </div>
+
+      <div style={styles.statusGuideCard}>
+        <div>
+          <h3 style={styles.sectionTitle}>Document status guide</h3>
+          <p style={styles.sectionDescription}>
+            The dashboard uses the following indicators throughout charts,
+            alerts and tables.
+          </p>
+        </div>
+
+        <div style={styles.statusGuideGrid}>
+          <StatusLegendItem
+            colour={STATUS_META.valid.colour}
+            background={STATUS_META.valid.background}
+            icon={STATUS_META.valid.icon}
+            label={STATUS_META.valid.label}
+            description={STATUS_META.valid.description}
+            count={healthyDocuments.length}
+          />
+
+          <StatusLegendItem
+            colour={STATUS_META.expiringSoon.colour}
+            background={STATUS_META.expiringSoon.background}
+            icon={STATUS_META.expiringSoon.icon}
+            label={STATUS_META.expiringSoon.label}
+            description={STATUS_META.expiringSoon.description}
+            count={expiringSoonDocuments.length}
+          />
+
+          <StatusLegendItem
+            colour={STATUS_META.expired.colour}
+            background={STATUS_META.expired.background}
+            icon={STATUS_META.expired.icon}
+            label={STATUS_META.expired.label}
+            description={STATUS_META.expired.description}
+            count={expiredDocuments.length}
+          />
+        </div>
       </div>
 
       <div style={styles.chartGrid}>
         <div style={styles.chartCard}>
-          <h3>Compliance Overview</h3>
+          <div style={styles.chartHeader}>
+            <div>
+              <h3 style={styles.sectionTitle}>Compliance Overview</h3>
+              <p style={styles.sectionDescription}>
+                Distribution of healthy, expiring and expired documents.
+              </p>
+            </div>
 
-          <ResponsiveContainer width="100%" height={260}>
+            <span style={styles.chartIndicator}>
+              ● Live data
+            </span>
+          </div>
+
+          <ResponsiveContainer width="100%" height={220}>
             <PieChart>
               <Pie
                 data={pieData}
                 cx="50%"
                 cy="50%"
-                outerRadius={90}
+                outerRadius={78}
+                innerRadius={42}
+                paddingAngle={2}
                 dataKey="value"
-                label
+                label={({ name, value }) =>
+                  value > 0 ? `${name} (${value})` : ''
+                }
               >
                 {pieData.map((entry, index) => (
                   <Cell
@@ -1081,15 +1183,50 @@ export default function Dashboard({ profile }) {
                 ))}
               </Pie>
 
-              <Tooltip />
+              <Tooltip
+                contentStyle={styles.tooltip}
+                formatter={(value, name) => [
+                  value,
+                  name,
+                ]}
+              />
             </PieChart>
           </ResponsiveContainer>
+
+          <div style={styles.inlineLegend}>
+            <LegendItem
+              colour={STATUS_META.valid.colour}
+              label="Valid"
+              value={healthyDocuments.length}
+            />
+            <LegendItem
+              colour={STATUS_META.expiringSoon.colour}
+              label="Expiring Soon"
+              value={expiringSoonDocuments.length}
+            />
+            <LegendItem
+              colour={STATUS_META.expired.colour}
+              label="Expired"
+              value={expiredDocuments.length}
+            />
+          </div>
         </div>
 
         <div style={styles.chartCard}>
-          <h3>Workforce Analytics</h3>
+          <div style={styles.chartHeader}>
+            <div>
+              <h3 style={styles.sectionTitle}>Workforce Analytics</h3>
+              <p style={styles.sectionDescription}>
+                Side-by-side view of people and document volumes.
+              </p>
+            </div>
 
-          <ResponsiveContainer width="100%" height={260}>
+            <span style={styles.chartIndicator}>
+              ▮ Comparison
+            </span>
+          </div>
+
+          <ResponsiveContainer width="100%" height={250}>
             <BarChart data={barData}>
               <CartesianGrid
                 strokeDasharray="3 3"
@@ -1099,6 +1236,7 @@ export default function Dashboard({ profile }) {
               <XAxis
                 dataKey="name"
                 stroke="#94a3b8"
+                tick={{ fontSize: 12 }}
               />
 
               <YAxis
@@ -1106,21 +1244,41 @@ export default function Dashboard({ profile }) {
                 stroke="#94a3b8"
               />
 
-              <Tooltip />
+              <Tooltip contentStyle={styles.tooltip} />
 
               <Bar
                 dataKey="total"
                 fill="#3b82f6"
+                radius={[6, 6, 0, 0]}
               />
             </BarChart>
           </ResponsiveContainer>
+
+          <div style={styles.chartNote}>
+            Blue bars show totals after the selected dashboard filters
+            are applied.
+          </div>
         </div>
       </div>
 
       <div style={styles.chartCardFull}>
-        <h3>Compliance Trend Snapshot</h3>
+        <div style={styles.chartHeader}>
+          <div>
+            <h3 style={styles.sectionTitle}>
+              Compliance Trend Snapshot
+            </h3>
+            <p style={styles.sectionDescription}>
+              A quick visual comparison of the main workforce compliance
+              measures in the current view.
+            </p>
+          </div>
 
-        <ResponsiveContainer width="100%" height={260}>
+          <span style={styles.chartIndicator}>
+            ↗ Snapshot
+          </span>
+        </div>
+
+        <ResponsiveContainer width="100%" height={250}>
           <LineChart data={complianceTrendData}>
             <CartesianGrid
               strokeDasharray="3 3"
@@ -1137,16 +1295,27 @@ export default function Dashboard({ profile }) {
               stroke="#94a3b8"
             />
 
-            <Tooltip />
+            <Tooltip contentStyle={styles.tooltip} />
 
             <Line
               type="monotone"
               dataKey="value"
               stroke="#22c55e"
               strokeWidth={3}
+              dot={{
+                r: 4,
+                fill: '#22c55e',
+                stroke: '#bbf7d0',
+                strokeWidth: 1,
+              }}
+              activeDot={{ r: 6 }}
             />
           </LineChart>
         </ResponsiveContainer>
+
+        <div style={styles.chartNote}>
+          This is a comparative snapshot, not a time-series history.
+        </div>
       </div>
 
       <div style={styles.alertCard}>
@@ -1256,11 +1425,95 @@ export default function Dashboard({ profile }) {
   )
 }
 
-function StatCard({ title, value }) {
+function StatCard({
+  title,
+  value,
+  icon,
+  accent = '#3b82f6',
+  helper,
+}) {
   return (
     <div style={styles.card}>
-      <h2 style={styles.cardValue}>{value}</h2>
-      <p style={styles.cardTitle}>{title}</p>
+      <div
+        style={{
+          ...styles.statIcon,
+          background: `${accent}22`,
+          borderColor: `${accent}55`,
+          color: accent,
+        }}
+        aria-hidden="true"
+      >
+        {icon}
+      </div>
+
+      <div>
+        <h2 style={styles.cardValue}>{value}</h2>
+        <p style={styles.cardTitle}>{title}</p>
+        {helper && (
+          <p style={styles.cardHelper}>{helper}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function LegendItem({ colour, label, value }) {
+  return (
+    <div style={styles.legendItem}>
+      <span
+        aria-hidden="true"
+        style={{
+          ...styles.legendDot,
+          background: colour,
+        }}
+      />
+      <span>{label}</span>
+      <strong style={styles.legendValue}>{value}</strong>
+    </div>
+  )
+}
+
+function StatusLegendItem({
+  colour,
+  background,
+  icon,
+  label,
+  description,
+  count,
+}) {
+  return (
+    <div style={styles.statusLegendItem}>
+      <div
+        style={{
+          ...styles.statusLegendIcon,
+          color: colour,
+          background,
+          borderColor: `${colour}66`,
+        }}
+        aria-hidden="true"
+      >
+        {icon}
+      </div>
+
+      <div style={styles.statusLegendContent}>
+        <div style={styles.statusLegendTitleRow}>
+          <strong>{label}</strong>
+          <span
+            style={{
+              ...styles.statusCount,
+              color: colour,
+              borderColor: `${colour}55`,
+              background: `${colour}16`,
+            }}
+          >
+            {count}
+          </span>
+        </div>
+
+        <span style={styles.statusLegendDescription}>
+          {description}
+        </span>
+      </div>
     </div>
   )
 }
@@ -1372,23 +1625,118 @@ const styles = {
     gridTemplateColumns:
       'repeat(auto-fit, minmax(220px, 1fr))',
     gap: '20px',
-    marginBottom: '30px',
+    marginBottom: '24px',
   },
 
   card: {
     background: '#0f172a',
     border: '1px solid #1e293b',
     borderRadius: '14px',
-    padding: '24px',
+    padding: '20px',
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '14px',
+    minHeight: '112px',
+  },
+
+  statIcon: {
+    width: '42px',
+    height: '42px',
+    flexShrink: 0,
+    borderRadius: '12px',
+    border: '1px solid',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '20px',
+    fontWeight: 800,
   },
 
   cardValue: {
     marginTop: 0,
-    marginBottom: '8px',
+    marginBottom: '4px',
+    fontSize: '24px',
   },
 
   cardTitle: {
     margin: 0,
+    fontWeight: 700,
+  },
+
+  cardHelper: {
+    margin: '6px 0 0',
+    color: '#94a3b8',
+    fontSize: '12px',
+    lineHeight: 1.45,
+  },
+
+  statusGuideCard: {
+    background: '#0f172a',
+    border: '1px solid #1e293b',
+    borderRadius: '14px',
+    padding: '20px',
+    marginBottom: '30px',
+  },
+
+  statusGuideGrid: {
+    display: 'grid',
+    gridTemplateColumns:
+      'repeat(auto-fit, minmax(220px, 1fr))',
+    gap: '14px',
+    marginTop: '16px',
+  },
+
+  statusLegendItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '14px',
+    borderRadius: '12px',
+    background: '#020617',
+    border: '1px solid #1e293b',
+  },
+
+  statusLegendIcon: {
+    width: '38px',
+    height: '38px',
+    borderRadius: '999px',
+    border: '1px solid',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: 900,
+    fontSize: '18px',
+    flexShrink: 0,
+  },
+
+  statusLegendContent: {
+    minWidth: 0,
+    width: '100%',
+  },
+
+  statusLegendTitleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '10px',
+  },
+
+  statusCount: {
+    minWidth: '30px',
+    padding: '3px 8px',
+    borderRadius: '999px',
+    border: '1px solid',
+    textAlign: 'center',
+    fontSize: '12px',
+    fontWeight: 800,
+  },
+
+  statusLegendDescription: {
+    display: 'block',
+    marginTop: '4px',
+    color: '#94a3b8',
+    fontSize: '12px',
+    lineHeight: 1.45,
   },
 
   chartGrid: {
@@ -1404,7 +1752,7 @@ const styles = {
     border: '1px solid #1e293b',
     borderRadius: '14px',
     padding: '20px',
-    height: '340px',
+    minHeight: '390px',
   },
 
   chartCardFull: {
@@ -1412,8 +1760,83 @@ const styles = {
     border: '1px solid #1e293b',
     borderRadius: '14px',
     padding: '20px',
-    height: '340px',
+    minHeight: '390px',
     marginBottom: '30px',
+  },
+
+  chartHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: '16px',
+    flexWrap: 'wrap',
+    marginBottom: '6px',
+  },
+
+  sectionTitle: {
+    margin: 0,
+  },
+
+  sectionDescription: {
+    margin: '6px 0 0',
+    color: '#94a3b8',
+    fontSize: '13px',
+    lineHeight: 1.5,
+  },
+
+  chartIndicator: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '6px 10px',
+    borderRadius: '999px',
+    border: '1px solid #334155',
+    background: '#020617',
+    color: '#93c5fd',
+    fontSize: '12px',
+    fontWeight: 700,
+  },
+
+  inlineLegend: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: '12px 20px',
+    marginTop: '4px',
+  },
+
+  legendItem: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
+    color: '#cbd5e1',
+    fontSize: '13px',
+  },
+
+  legendDot: {
+    width: '10px',
+    height: '10px',
+    borderRadius: '999px',
+    flexShrink: 0,
+  },
+
+  legendValue: {
+    color: '#ffffff',
+  },
+
+  chartNote: {
+    marginTop: '4px',
+    color: '#64748b',
+    fontSize: '12px',
+    textAlign: 'center',
+  },
+
+  tooltip: {
+    background: '#020617',
+    border: '1px solid #334155',
+    borderRadius: '10px',
+    color: '#ffffff',
   },
 
   alertCard: {
