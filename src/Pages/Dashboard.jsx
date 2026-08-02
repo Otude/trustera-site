@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
 import toast from 'react-hot-toast'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -18,18 +23,26 @@ import {
 } from 'recharts'
 
 import { supabase } from '../supabase'
+import { can } from '../utils/permissions'
 
 const EXPIRY_WARNING_DAYS = 30
-const CHART_COLORS = ['#22c55e', '#f59e0b', '#ef4444']
+
+const CHART_COLOURS = [
+  '#22c55e',
+  '#f59e0b',
+  '#ef4444',
+]
 
 const STATUS_META = {
   valid: {
     label: 'Valid',
     colour: '#22c55e',
     background: '#052e16',
-    description: 'Current and outside the warning window',
+    description:
+      'Current and outside the warning window',
     icon: '✓',
   },
+
   expiringSoon: {
     label: 'Expiring Soon',
     colour: '#f59e0b',
@@ -37,6 +50,7 @@ const STATUS_META = {
     description: `Due within ${EXPIRY_WARNING_DAYS} days`,
     icon: '◷',
   },
+
   expired: {
     label: 'Expired',
     colour: '#ef4444',
@@ -46,114 +60,283 @@ const STATUS_META = {
   },
 }
 
+function getDaysUntilExpiry(dateValue) {
+  if (!dateValue) return null
+
+  const today = new Date()
+  const expiry = new Date(`${dateValue}T00:00:00`)
+
+  if (Number.isNaN(expiry.getTime())) {
+    return null
+  }
+
+  today.setHours(0, 0, 0, 0)
+  expiry.setHours(0, 0, 0, 0)
+
+  return Math.ceil(
+    (expiry.getTime() - today.getTime()) /
+      (1000 * 60 * 60 * 24),
+  )
+}
+
+function calculateDocumentState(expiryDate) {
+  if (!expiryDate) {
+    return {
+      status: 'valid',
+      expiringSoon: false,
+      daysUntilExpiry: null,
+      displayStatus: 'valid',
+    }
+  }
+
+  const daysUntilExpiry =
+    getDaysUntilExpiry(expiryDate)
+
+  if (daysUntilExpiry === null) {
+    return {
+      status: 'valid',
+      expiringSoon: false,
+      daysUntilExpiry: null,
+      displayStatus: 'valid',
+    }
+  }
+
+  if (daysUntilExpiry < 0) {
+    return {
+      status: 'expired',
+      expiringSoon: false,
+      daysUntilExpiry,
+      displayStatus: 'expired',
+    }
+  }
+
+  if (daysUntilExpiry <= EXPIRY_WARNING_DAYS) {
+    return {
+      status: 'valid',
+      expiringSoon: true,
+      daysUntilExpiry,
+      displayStatus: 'expiring soon',
+    }
+  }
+
+  return {
+    status: 'valid',
+    expiringSoon: false,
+    daysUntilExpiry,
+    displayStatus: 'valid',
+  }
+}
+
+function normaliseWorkerStatus(status) {
+  const value = String(status || '')
+    .trim()
+    .toLowerCase()
+
+  return value === 'inactive'
+    ? 'inactive'
+    : 'active'
+}
+
+function formatDate(dateValue) {
+  if (!dateValue) return '-'
+
+  const date = new Date(dateValue)
+
+  if (Number.isNaN(date.getTime())) {
+    return '-'
+  }
+
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function formatExpiryDate(dateValue) {
+  if (!dateValue) return '-'
+
+  const date = new Date(`${dateValue}T00:00:00`)
+
+  if (Number.isNaN(date.getTime())) {
+    return '-'
+  }
+
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date)
+}
+
+function getExportDateStamp() {
+  const now = new Date()
+
+  const year = now.getFullYear()
+  const month = String(
+    now.getMonth() + 1,
+  ).padStart(2, '0')
+  const day = String(now.getDate()).padStart(
+    2,
+    '0',
+  )
+
+  return `${year}-${month}-${day}`
+}
+
 export default function Dashboard({ profile }) {
   const [workers, setWorkers] = useState([])
   const [documents, setDocuments] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
 
-  const [siteFilter, setSiteFilter] = useState('all')
-  const [roleFilter, setRoleFilter] = useState('all')
-  const [workerStatusFilter, setWorkerStatusFilter] =
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] =
+    useState(false)
+
+  const [siteFilter, setSiteFilter] =
     useState('all')
-  const [documentStatusFilter, setDocumentStatusFilter] =
+  const [roleFilter, setRoleFilter] =
     useState('all')
-  const [startDate, setStartDate] = useState('')
+  const [
+    workerStatusFilter,
+    setWorkerStatusFilter,
+  ] = useState('all')
+  const [
+    documentStatusFilter,
+    setDocumentStatusFilter,
+  ] = useState('all')
+  const [startDate, setStartDate] =
+    useState('')
   const [endDate, setEndDate] = useState('')
+
+  const [pageError, setPageError] =
+    useState('')
 
   const companyId = profile?.company_id || null
 
-  const calculateStatus = useCallback((date) => {
-    if (!date) return 'valid'
+  const canManageDocuments = can(
+    profile,
+    'manageDocuments',
+  )
 
-    return getDaysUntilExpiry(date) < 0 ? 'expired' : 'valid'
-  }, [])
+  const canExportReports = can(
+    profile,
+    'exportReports',
+  )
 
-  const isExpiringSoon = useCallback((date) => {
-    if (!date) return false
+  const canViewNotifications = can(
+    profile,
+    'viewNotifications',
+  )
 
-    const daysLeft = getDaysUntilExpiry(date)
-
-    return daysLeft >= 0 && daysLeft <= EXPIRY_WARNING_DAYS
-  }, [])
+  const canCreateNotifications =
+    canManageDocuments && canViewNotifications
 
   const generateNotifications = useCallback(
-    async (companyDocuments, currentCompanyId) => {
-      const notificationRecords = companyDocuments
-        .map((document) => {
-          if (document.company_id !== currentCompanyId) {
-            return null
-          }
+    async (
+      companyDocuments,
+      currentCompanyId,
+    ) => {
+      if (
+        !currentCompanyId ||
+        !canCreateNotifications
+      ) {
+        return
+      }
 
-          const status = calculateStatus(document.expiry_date)
-          const expiringSoon = isExpiringSoon(
-            document.expiry_date,
-          )
+      const notificationRecords =
+        companyDocuments
+          .map((document) => {
+            if (
+              document.company_id !==
+              currentCompanyId
+            ) {
+              return null
+            }
 
-          if (status !== 'expired' && !expiringSoon) {
-            return null
-          }
+            if (
+              document.displayStatus !==
+                'expired' &&
+              document.displayStatus !==
+                'expiring soon'
+            ) {
+              return null
+            }
 
-          const notificationStatus =
-            status === 'expired' ? 'expired' : 'expiring soon'
+            const notificationStatus =
+              document.displayStatus
 
-          const worker = document.workers
+            const worker = document.workers
 
-          return {
-            document_id: document.id,
-            company_id: currentCompanyId,
-            worker_name: worker?.full_name || null,
-            document_type: document.document_type,
-            expiry_date: document.expiry_date,
-            status: notificationStatus,
-            severity:
-              notificationStatus === 'expired'
-                ? 'critical'
-                : 'warning',
-            message:
-              notificationStatus === 'expired'
-                ? `${document.document_type} has expired${
-                    worker?.full_name
-                      ? ` for ${worker.full_name}`
-                      : ''
-                  }.`
-                : `${document.document_type} is expiring within ${EXPIRY_WARNING_DAYS} days${
-                    worker?.full_name
-                      ? ` for ${worker.full_name}`
-                      : ''
-                  }.`,
-            is_read: false,
-          }
-        })
-        .filter(Boolean)
+            return {
+              document_id: document.id,
+              company_id: currentCompanyId,
+              worker_name:
+                worker?.full_name || null,
+              document_type:
+                document.document_type,
+              expiry_date:
+                document.expiry_date,
+              status: notificationStatus,
+              severity:
+                notificationStatus ===
+                'expired'
+                  ? 'critical'
+                  : 'warning',
+              message:
+                notificationStatus ===
+                'expired'
+                  ? `${
+                      document.document_type ||
+                      'Document'
+                    } has expired${
+                      worker?.full_name
+                        ? ` for ${worker.full_name}`
+                        : ''
+                    }.`
+                  : `${
+                      document.document_type ||
+                      'Document'
+                    } is expiring within ${EXPIRY_WARNING_DAYS} days${
+                      worker?.full_name
+                        ? ` for ${worker.full_name}`
+                        : ''
+                    }.`,
+              is_read: false,
+            }
+          })
+          .filter(Boolean)
 
-      if (notificationRecords.length === 0) {
+      if (
+        notificationRecords.length === 0
+      ) {
         return
       }
 
       const { error } = await supabase
         .from('notification_logs')
         .upsert(notificationRecords, {
-          onConflict: 'document_id,status',
+          onConflict:
+            'document_id,status',
           ignoreDuplicates: true,
         })
 
       if (error) {
-        console.error(
-          'Unable to generate compliance notifications:',
+        console.warn(
+          'Compliance notifications could not be generated:',
           error,
-        )
-
-        toast.error(
-          'Dashboard loaded, but some notifications could not be generated.',
         )
       }
     },
-    [calculateStatus, isExpiringSoon],
+    [canCreateNotifications],
   )
 
   const fetchDashboardData = useCallback(
-    async ({ showFullLoader = true } = {}) => {
+    async ({
+      showFullLoader = true,
+      showSuccessMessage = false,
+    } = {}) => {
       if (!companyId) {
         setWorkers([])
         setDocuments([])
@@ -168,47 +351,55 @@ export default function Dashboard({ profile }) {
         setRefreshing(true)
       }
 
+      setPageError('')
+
       try {
-        const [workersResult, documentsResult] =
-          await Promise.all([
-            supabase
-              .from('workers')
-              .select(`
+        const [
+          workersResult,
+          documentsResult,
+        ] = await Promise.all([
+          supabase
+            .from('workers')
+            .select(`
+              id,
+              company_id,
+              full_name,
+              role,
+              site,
+              status,
+              created_at
+            `)
+            .eq('company_id', companyId)
+            .order('created_at', {
+              ascending: false,
+            }),
+
+          supabase
+            .from('documents')
+            .select(`
+              id,
+              company_id,
+              worker_id,
+              document_type,
+              expiry_date,
+              status,
+              file_path,
+              file_url,
+              created_at,
+              workers (
                 id,
                 company_id,
                 full_name,
                 role,
                 site,
-                status,
-                created_at
-              `)
-              .eq('company_id', companyId)
-              .order('created_at', { ascending: false }),
-
-            supabase
-              .from('documents')
-              .select(`
-                id,
-                company_id,
-                worker_id,
-                document_type,
-                expiry_date,
-                status,
-                file_path,
-                file_url,
-                created_at,
-                workers (
-                  id,
-                  company_id,
-                  full_name,
-                  role,
-                  site,
-                  status
-                )
-              `)
-              .eq('company_id', companyId)
-              .order('created_at', { ascending: false }),
-          ])
+                status
+              )
+            `)
+            .eq('company_id', companyId)
+            .order('created_at', {
+              ascending: false,
+            }),
+        ])
 
         if (workersResult.error) {
           throw workersResult.error
@@ -218,23 +409,35 @@ export default function Dashboard({ profile }) {
           throw documentsResult.error
         }
 
-        const companyWorkers = (workersResult.data || []).filter(
-          (worker) => worker.company_id === companyId,
+        const companyWorkers = (
+          workersResult.data || []
         )
+          .filter(
+            (worker) =>
+              worker.company_id === companyId,
+          )
+          .map((worker) => ({
+            ...worker,
+            status:
+              normaliseWorkerStatus(
+                worker.status,
+              ),
+          }))
 
         const companyDocuments = (
           documentsResult.data || []
         )
           .filter(
             (document) =>
-              document.company_id === companyId &&
+              document.company_id ===
+                companyId &&
               (!document.workers ||
-                document.workers.company_id === companyId),
+                document.workers
+                  .company_id === companyId),
           )
           .map((document) => ({
             ...document,
-            status: calculateStatus(document.expiry_date),
-            expiringSoon: isExpiringSoon(
+            ...calculateDocumentState(
               document.expiry_date,
             ),
           }))
@@ -246,21 +449,32 @@ export default function Dashboard({ profile }) {
           companyDocuments,
           companyId,
         )
+
+        if (showSuccessMessage) {
+          toast.success(
+            'Dashboard refreshed.',
+          )
+        }
       } catch (error) {
-        console.error('Unable to load dashboard:', error)
-        toast.error(
-          error?.message || 'Unable to load dashboard data.',
+        console.error(
+          'Unable to load dashboard:',
+          error,
         )
+
+        const message =
+          error?.message ||
+          'Unable to load dashboard data.'
+
+        setPageError(message)
+        toast.error(message)
       } finally {
         setLoading(false)
         setRefreshing(false)
       }
     },
     [
-      calculateStatus,
       companyId,
       generateNotifications,
-      isExpiringSoon,
     ],
   )
 
@@ -268,18 +482,47 @@ export default function Dashboard({ profile }) {
     fetchDashboardData()
   }, [fetchDashboardData])
 
-  function getDaysUntilExpiry(date) {
-    const today = new Date()
-    const expiry = new Date(`${date}T00:00:00`)
+  useEffect(() => {
+    if (!companyId) return undefined
 
-    today.setHours(0, 0, 0, 0)
-    expiry.setHours(0, 0, 0, 0)
+    const channel = supabase
+      .channel(
+        `dashboard-company-${companyId}`,
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'workers',
+          filter: `company_id=eq.${companyId}`,
+        },
+        () => {
+          fetchDashboardData({
+            showFullLoader: false,
+          })
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'documents',
+          filter: `company_id=eq.${companyId}`,
+        },
+        () => {
+          fetchDashboardData({
+            showFullLoader: false,
+          })
+        },
+      )
+      .subscribe()
 
-    return Math.ceil(
-      (expiry.getTime() - today.getTime()) /
-        (1000 * 60 * 60 * 24),
-    )
-  }
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [companyId, fetchDashboardData])
 
   function resetFilters() {
     setSiteFilter('all')
@@ -290,28 +533,32 @@ export default function Dashboard({ profile }) {
     setEndDate('')
   }
 
-  function formatDate(dateValue) {
-    if (!dateValue) return '-'
+  function getWorkerForDocument(
+    documentRecord,
+  ) {
+    if (
+      documentRecord.workers?.company_id ===
+      companyId
+    ) {
+      return documentRecord.workers
+    }
 
-    const date = new Date(dateValue)
-
-    if (Number.isNaN(date.getTime())) return '-'
-
-    return date.toLocaleString('en-GB')
-  }
-
-  function getWorkerForDocument(document) {
-    return (
-      document.workers ||
-      workers.find(
-        (worker) =>
-          worker.id === document.worker_id &&
-          worker.company_id === companyId,
-      )
+    return workers.find(
+      (worker) =>
+        worker.id ===
+          documentRecord.worker_id &&
+        worker.company_id === companyId,
     )
   }
 
   function downloadCSV(filename, rows) {
+    if (!canExportReports) {
+      toast.error(
+        'Your role does not allow report exports.',
+      )
+      return
+    }
+
     if (rows.length === 0) {
       toast.error('No data to export.')
       return
@@ -324,20 +571,28 @@ export default function Dashboard({ profile }) {
       ...rows.map((row) =>
         headers
           .map((header) => {
-            const value = row[header] ?? ''
+            const value =
+              row[header] ?? ''
 
-            return `"${String(value).replaceAll('"', '""')}"`
+            return `"${String(
+              value,
+            ).replaceAll('"', '""')}"`
           })
           .join(','),
       ),
     ].join('\n')
 
-    const blob = new Blob([csv], {
-      type: 'text/csv;charset=utf-8;',
-    })
+    const blob = new Blob(
+      [`\uFEFF${csv}`],
+      {
+        type: 'text/csv;charset=utf-8;',
+      },
+    )
 
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
+    const url =
+      URL.createObjectURL(blob)
+    const link =
+      document.createElement('a')
 
     link.href = url
     link.download = filename
@@ -349,16 +604,22 @@ export default function Dashboard({ profile }) {
 
     URL.revokeObjectURL(url)
 
-    toast.success('CSV exported successfully.')
+    toast.success(
+      'CSV exported successfully.',
+    )
   }
 
   const sites = useMemo(
     () =>
       [
         ...new Set(
-          workers.map((worker) => worker.site).filter(Boolean),
+          workers
+            .map((worker) => worker.site)
+            .filter(Boolean),
         ),
-      ].sort(),
+      ].sort((a, b) =>
+        String(a).localeCompare(String(b)),
+      ),
     [workers],
   )
 
@@ -366,9 +627,13 @@ export default function Dashboard({ profile }) {
     () =>
       [
         ...new Set(
-          workers.map((worker) => worker.role).filter(Boolean),
+          workers
+            .map((worker) => worker.role)
+            .filter(Boolean),
         ),
-      ].sort(),
+      ].sort((a, b) =>
+        String(a).localeCompare(String(b)),
+      ),
     [workers],
   )
 
@@ -385,7 +650,8 @@ export default function Dashboard({ profile }) {
 
         const matchesStatus =
           workerStatusFilter === 'all' ||
-          worker.status === workerStatusFilter
+          worker.status ===
+            workerStatusFilter
 
         return (
           matchesSite &&
@@ -402,48 +668,55 @@ export default function Dashboard({ profile }) {
   )
 
   const filteredWorkerIds = useMemo(
-    () => new Set(filteredWorkers.map((worker) => worker.id)),
+    () =>
+      new Set(
+        filteredWorkers.map(
+          (worker) => worker.id,
+        ),
+      ),
     [filteredWorkers],
   )
 
   const filteredDocuments = useMemo(
     () =>
-      documents.filter((document) => {
+      documents.filter((documentRecord) => {
         const belongsToFilteredWorker =
-          filteredWorkerIds.has(document.worker_id)
-
-        const documentDisplayStatus =
-          document.status === 'expired'
-            ? 'expired'
-            : document.expiringSoon
-              ? 'expiring soon'
-              : 'valid'
+          filteredWorkerIds.has(
+            documentRecord.worker_id,
+          )
 
         const matchesStatus =
           documentStatusFilter === 'all' ||
-          documentDisplayStatus === documentStatusFilter
+          documentRecord.displayStatus ===
+            documentStatusFilter
 
-        const expiryTimestamp = document.expiry_date
+        const expiryTimestamp =
+          documentRecord.expiry_date
+            ? new Date(
+                `${documentRecord.expiry_date}T00:00:00`,
+              ).getTime()
+            : null
+
+        const startTimestamp = startDate
           ? new Date(
-              `${document.expiry_date}T00:00:00`,
+              `${startDate}T00:00:00`,
             ).getTime()
           : null
 
-        const startTimestamp = startDate
-          ? new Date(`${startDate}T00:00:00`).getTime()
-          : null
-
         const endTimestamp = endDate
-          ? new Date(`${endDate}T23:59:59`).getTime()
+          ? new Date(
+              `${endDate}T23:59:59`,
+            ).getTime()
           : null
 
         const matchesStartDate =
-          !startTimestamp ||
+          startTimestamp === null ||
           (expiryTimestamp !== null &&
-            expiryTimestamp >= startTimestamp)
+            expiryTimestamp >=
+              startTimestamp)
 
         const matchesEndDate =
-          !endTimestamp ||
+          endTimestamp === null ||
           (expiryTimestamp !== null &&
             expiryTimestamp <= endTimestamp)
 
@@ -466,7 +739,8 @@ export default function Dashboard({ profile }) {
   const activeWorkers = useMemo(
     () =>
       filteredWorkers.filter(
-        (worker) => worker.status === 'active',
+        (worker) =>
+          worker.status === 'active',
       ),
     [filteredWorkers],
   )
@@ -474,7 +748,8 @@ export default function Dashboard({ profile }) {
   const inactiveWorkers = useMemo(
     () =>
       filteredWorkers.filter(
-        (worker) => worker.status === 'inactive',
+        (worker) =>
+          worker.status === 'inactive',
       ),
     [filteredWorkers],
   )
@@ -482,7 +757,9 @@ export default function Dashboard({ profile }) {
   const expiredDocuments = useMemo(
     () =>
       filteredDocuments.filter(
-        (document) => document.status === 'expired',
+        (documentRecord) =>
+          documentRecord.displayStatus ===
+          'expired',
       ),
     [filteredDocuments],
   )
@@ -490,9 +767,9 @@ export default function Dashboard({ profile }) {
   const expiringSoonDocuments = useMemo(
     () =>
       filteredDocuments.filter(
-        (document) =>
-          document.status !== 'expired' &&
-          document.expiringSoon,
+        (documentRecord) =>
+          documentRecord.displayStatus ===
+          'expiring soon',
       ),
     [filteredDocuments],
   )
@@ -500,17 +777,19 @@ export default function Dashboard({ profile }) {
   const healthyDocuments = useMemo(
     () =>
       filteredDocuments.filter(
-        (document) =>
-          document.status === 'valid' &&
-          !document.expiringSoon,
+        (documentRecord) =>
+          documentRecord.displayStatus ===
+          'valid',
       ),
     [filteredDocuments],
   )
 
-  const currentlyValidDocuments = useMemo(
+  const nonExpiredDocuments = useMemo(
     () =>
       filteredDocuments.filter(
-        (document) => document.status === 'valid',
+        (documentRecord) =>
+          documentRecord.displayStatus !==
+          'expired',
       ),
     [filteredDocuments],
   )
@@ -518,14 +797,25 @@ export default function Dashboard({ profile }) {
   const complianceScore =
     filteredDocuments.length > 0
       ? Math.round(
-          (currentlyValidDocuments.length /
+          (nonExpiredDocuments.length /
             filteredDocuments.length) *
             100,
         )
       : 0
 
   const recentDocuments = useMemo(
-    () => filteredDocuments.slice(0, 5),
+    () =>
+      [...filteredDocuments]
+        .sort(
+          (a, b) =>
+            new Date(
+              b.created_at || 0,
+            ).getTime() -
+            new Date(
+              a.created_at || 0,
+            ).getTime(),
+        )
+        .slice(0, 5),
     [filteredDocuments],
   )
 
@@ -537,7 +827,8 @@ export default function Dashboard({ profile }) {
       },
       {
         name: 'Expiring Soon',
-        value: expiringSoonDocuments.length,
+        value:
+          expiringSoonDocuments.length,
       },
       {
         name: 'Expired',
@@ -549,6 +840,14 @@ export default function Dashboard({ profile }) {
       expiringSoonDocuments.length,
       healthyDocuments.length,
     ],
+  )
+
+  const hasPieData = useMemo(
+    () =>
+      pieData.some(
+        (item) => item.value > 0,
+      ),
+    [pieData],
   )
 
   const barData = useMemo(
@@ -579,7 +878,8 @@ export default function Dashboard({ profile }) {
       },
       {
         name: 'Soon',
-        total: expiringSoonDocuments.length,
+        total:
+          expiringSoonDocuments.length,
       },
     ],
     [
@@ -593,14 +893,14 @@ export default function Dashboard({ profile }) {
     ],
   )
 
-  const complianceTrendData = useMemo(
+  const complianceSnapshotData = useMemo(
     () => [
       {
         name: 'Workers',
         value: filteredWorkers.length,
       },
       {
-        name: 'Docs',
+        name: 'Documents',
         value: filteredDocuments.length,
       },
       {
@@ -613,7 +913,8 @@ export default function Dashboard({ profile }) {
       },
       {
         name: 'Soon',
-        value: expiringSoonDocuments.length,
+        value:
+          expiringSoonDocuments.length,
       },
     ],
     [
@@ -626,112 +927,159 @@ export default function Dashboard({ profile }) {
   )
 
   function exportComplianceCSV() {
-    const rows = filteredDocuments.map((document) => {
-      const worker = getWorkerForDocument(document)
+    const rows = filteredDocuments.map(
+      (documentRecord) => {
+        const worker =
+          getWorkerForDocument(
+            documentRecord,
+          )
 
-      return {
-        Worker: worker?.full_name || '-',
-        Role: worker?.role || '-',
-        Site: worker?.site || '-',
-        Document: document.document_type || '-',
-        ExpiryDate: document.expiry_date || '-',
-        Status:
-          document.status === 'expired'
-            ? 'expired'
-            : document.expiringSoon
-              ? 'expiring soon'
-              : 'valid',
-        Warning: document.expiringSoon
-          ? 'expiring soon'
-          : '-',
-        UploadedAt: formatDate(document.created_at),
-      }
-    })
+        return {
+          Worker:
+            worker?.full_name || '-',
+          Role: worker?.role || '-',
+          Site: worker?.site || '-',
+          Document:
+            documentRecord.document_type ||
+            '-',
+          ExpiryDate:
+            documentRecord.expiry_date ||
+            '-',
+          Status:
+            documentRecord.displayStatus,
+          DaysUntilExpiry:
+            documentRecord
+              .daysUntilExpiry ?? '-',
+          UploadedAt: formatDate(
+            documentRecord.created_at,
+          ),
+        }
+      },
+    )
 
     downloadCSV(
-      'trustera-compliance-report.csv',
+      `trustera-compliance-report-${getExportDateStamp()}.csv`,
       rows,
     )
   }
 
   function exportAuditCSV() {
     const rows = [
-      ...filteredWorkers.map((worker) => ({
-        Type: 'Worker',
-        Name: worker.full_name || '-',
-        Role: worker.role || '-',
-        Site: worker.site || '-',
-        Status: worker.status || '-',
-        CreatedAt: formatDate(worker.created_at),
-      })),
-
-      ...filteredDocuments.map((document) => {
-        const worker = getWorkerForDocument(document)
-
-        return {
-          Type: 'Document',
-          Name: document.document_type || '-',
-          Role: worker?.role || '-',
-          Site: worker?.site || '-',
+      ...filteredWorkers.map(
+        (worker) => ({
+          Type: 'Worker',
+          Name:
+            worker.full_name || '-',
+          Role: worker.role || '-',
+          Site: worker.site || '-',
           Status:
-            document.status === 'expired'
-              ? 'expired'
-              : document.expiringSoon
-                ? 'expiring soon'
-                : 'valid',
-          CreatedAt: formatDate(document.created_at),
-        }
-      }),
+            worker.status || '-',
+          CreatedAt: formatDate(
+            worker.created_at,
+          ),
+        }),
+      ),
+
+      ...filteredDocuments.map(
+        (documentRecord) => {
+          const worker =
+            getWorkerForDocument(
+              documentRecord,
+            )
+
+          return {
+            Type: 'Document',
+            Name:
+              documentRecord.document_type ||
+              '-',
+            Role:
+              worker?.role || '-',
+            Site:
+              worker?.site || '-',
+            Status:
+              documentRecord.displayStatus,
+            CreatedAt: formatDate(
+              documentRecord.created_at,
+            ),
+          }
+        },
+      ),
     ]
 
-    downloadCSV('trustera-audit-report.csv', rows)
+    downloadCSV(
+      `trustera-audit-report-${getExportDateStamp()}.csv`,
+      rows,
+    )
   }
 
   function exportCompliancePDF() {
-    if (filteredDocuments.length === 0) {
-      toast.error('No compliance data to export.')
+    if (!canExportReports) {
+      toast.error(
+        'Your role does not allow report exports.',
+      )
       return
     }
 
-    const pdf = new jsPDF()
+    if (filteredDocuments.length === 0) {
+      toast.error(
+        'No compliance data to export.',
+      )
+      return
+    }
+
+    const pdf = new jsPDF({
+      orientation: 'landscape',
+    })
 
     pdf.setFontSize(18)
-    pdf.text('Trustera Compliance Report', 14, 18)
+    pdf.text(
+      'Trustera Compliance Report',
+      14,
+      18,
+    )
 
     pdf.setFontSize(10)
+
     pdf.text(
-      `Generated: ${new Date().toLocaleString('en-GB')}`,
+      `Generated: ${new Date().toLocaleString(
+        'en-GB',
+      )}`,
       14,
       26,
     )
+
     pdf.text(
       `Compliance Score: ${complianceScore}%`,
       14,
       32,
     )
+
     pdf.text(
       `Workers: ${filteredWorkers.length}`,
       14,
       38,
     )
+
     pdf.text(
       `Documents: ${filteredDocuments.length}`,
       14,
       44,
     )
+
     pdf.text(
       `Expired: ${expiredDocuments.length}`,
-      14,
-      50,
+      90,
+      38,
     )
+
     pdf.text(
       `Expiring Soon: ${expiringSoonDocuments.length}`,
-      14,
-      56,
+      90,
+      44,
     )
 
     autoTable(pdf, {
-      startY: 66,
+      startY: 54,
       head: [
         [
           'Worker',
@@ -740,59 +1088,93 @@ export default function Dashboard({ profile }) {
           'Document',
           'Expiry Date',
           'Status',
-          'Warning',
+          'Days Remaining',
         ],
       ],
-      body: filteredDocuments.map((document) => {
-        const worker = getWorkerForDocument(document)
+      body: filteredDocuments.map(
+        (documentRecord) => {
+          const worker =
+            getWorkerForDocument(
+              documentRecord,
+            )
 
-        return [
-          worker?.full_name || '-',
-          worker?.role || '-',
-          worker?.site || '-',
-          document.document_type || '-',
-          document.expiry_date || '-',
-          document.status === 'expired'
-            ? 'expired'
-            : document.expiringSoon
-              ? 'expiring soon'
-              : 'valid',
-          document.expiringSoon
-            ? 'expiring soon'
-            : '-',
-        ]
-      }),
+          return [
+            worker?.full_name || '-',
+            worker?.role || '-',
+            worker?.site || '-',
+            documentRecord.document_type ||
+              '-',
+            formatExpiryDate(
+              documentRecord.expiry_date,
+            ),
+            documentRecord.displayStatus,
+            documentRecord
+              .daysUntilExpiry ?? '-',
+          ]
+        },
+      ),
+      styles: {
+        fontSize: 8,
+      },
+      headStyles: {
+        fillColor: [37, 99, 235],
+      },
     })
 
-    pdf.save('trustera-compliance-report.pdf')
-    toast.success('Compliance PDF exported.')
+    pdf.save(
+      `trustera-compliance-report-${getExportDateStamp()}.pdf`,
+    )
+
+    toast.success(
+      'Compliance PDF exported.',
+    )
   }
 
   function exportAuditPDF() {
+    if (!canExportReports) {
+      toast.error(
+        'Your role does not allow report exports.',
+      )
+      return
+    }
+
     if (
       filteredWorkers.length === 0 &&
       filteredDocuments.length === 0
     ) {
-      toast.error('No audit data to export.')
+      toast.error(
+        'No audit data to export.',
+      )
       return
     }
 
-    const pdf = new jsPDF()
+    const pdf = new jsPDF({
+      orientation: 'landscape',
+    })
 
     pdf.setFontSize(18)
-    pdf.text('Trustera Audit Report', 14, 18)
+    pdf.text(
+      'Trustera Audit Report',
+      14,
+      18,
+    )
 
     pdf.setFontSize(10)
+
     pdf.text(
-      `Generated: ${new Date().toLocaleString('en-GB')}`,
+      `Generated: ${new Date().toLocaleString(
+        'en-GB',
+      )}`,
       14,
       26,
     )
+
     pdf.text(
       `Filtered Workers: ${filteredWorkers.length}`,
       14,
       32,
     )
+
     pdf.text(
       `Filtered Documents: ${filteredDocuments.length}`,
       14,
@@ -812,44 +1194,72 @@ export default function Dashboard({ profile }) {
         ],
       ],
       body: [
-        ...filteredWorkers.map((worker) => [
-          'Worker',
-          worker.full_name || '-',
-          worker.role || '-',
-          worker.site || '-',
-          worker.status || '-',
-          formatDate(worker.created_at),
-        ]),
+        ...filteredWorkers.map(
+          (worker) => [
+            'Worker',
+            worker.full_name || '-',
+            worker.role || '-',
+            worker.site || '-',
+            worker.status || '-',
+            formatDate(
+              worker.created_at,
+            ),
+          ],
+        ),
 
-        ...filteredDocuments.map((document) => {
-          const worker = getWorkerForDocument(document)
+        ...filteredDocuments.map(
+          (documentRecord) => {
+            const worker =
+              getWorkerForDocument(
+                documentRecord,
+              )
 
-          return [
-            'Document',
-            document.document_type || '-',
-            worker?.role || '-',
-            worker?.site || '-',
-            document.status === 'expired'
-              ? 'expired'
-              : document.expiringSoon
-                ? 'expiring soon'
-                : 'valid',
-            formatDate(document.created_at),
-          ]
-        }),
+            return [
+              'Document',
+              documentRecord.document_type ||
+                '-',
+              worker?.role || '-',
+              worker?.site || '-',
+              documentRecord.displayStatus,
+              formatDate(
+                documentRecord.created_at,
+              ),
+            ]
+          },
+        ),
       ],
+      styles: {
+        fontSize: 8,
+      },
+      headStyles: {
+        fillColor: [37, 99, 235],
+      },
     })
 
-    pdf.save('trustera-audit-report.pdf')
+    pdf.save(
+      `trustera-audit-report-${getExportDateStamp()}.pdf`,
+    )
+
     toast.success('Audit PDF exported.')
+  }
+
+  if (!profile) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.loadingPanel}>
+          Loading your Trustera profile...
+        </div>
+      </div>
+    )
   }
 
   if (!companyId) {
     return (
       <div style={styles.container}>
         <div style={styles.errorPanel}>
-          Your account is not assigned to a company. Sign out and
-          contact an administrator.
+          Your account is not assigned to a
+          company. Sign out and contact an
+          administrator.
         </div>
       </div>
     )
@@ -857,8 +1267,17 @@ export default function Dashboard({ profile }) {
 
   if (loading) {
     return (
-      <div style={styles.container}>
-        <h2>Loading dashboard...</h2>
+      <div style={styles.loadingPage}>
+        <div style={styles.loadingSpinner} />
+
+        <h2 style={styles.loadingTitle}>
+          Loading dashboard...
+        </h2>
+
+        <p style={styles.loadingText}>
+          Retrieving your organisation’s
+          workforce and compliance records.
+        </p>
       </div>
     )
   }
@@ -867,13 +1286,17 @@ export default function Dashboard({ profile }) {
     <div style={styles.container}>
       <div style={styles.headerRow}>
         <div>
-          <h2 style={styles.heading}>
+          <p style={styles.eyebrow}>
+            Organisation overview
+          </p>
+
+          <h1 style={styles.heading}>
             Trustera Dashboard
-          </h2>
+          </h1>
 
           <p style={styles.subText}>
-            Compliance, workforce and document analytics for
-            your organisation.
+            Compliance, workforce and document
+            analytics for your organisation.
           </p>
         </div>
 
@@ -882,6 +1305,7 @@ export default function Dashboard({ profile }) {
           onClick={() =>
             fetchDashboardData({
               showFullLoader: false,
+              showSuccessMessage: true,
             })
           }
           style={{
@@ -892,63 +1316,120 @@ export default function Dashboard({ profile }) {
           }}
           disabled={refreshing}
         >
-          {refreshing ? 'Refreshing...' : 'Refresh'}
+          {refreshing
+            ? 'Refreshing...'
+            : 'Refresh'}
         </button>
       </div>
 
-      <div style={styles.exportCard}>
-        <h3>Export Reports</h3>
-
-        <div style={styles.exportGrid}>
-          <button
-            type="button"
-            onClick={exportComplianceCSV}
-            style={styles.exportButton}
-          >
-            Export Compliance CSV
-          </button>
-
-          <button
-            type="button"
-            onClick={exportCompliancePDF}
-            style={styles.exportButton}
-          >
-            Export Compliance PDF
-          </button>
-
-          <button
-            type="button"
-            onClick={exportAuditCSV}
-            style={styles.exportButton}
-          >
-            Export Audit CSV
-          </button>
-
-          <button
-            type="button"
-            onClick={exportAuditPDF}
-            style={styles.exportButton}
-          >
-            Export Audit PDF
-          </button>
+      {pageError && (
+        <div style={styles.inlineError}>
+          {pageError}
         </div>
-      </div>
+      )}
 
-      <div style={styles.filterCard}>
-        <h3>Dashboard Filters</h3>
+      {canExportReports ? (
+        <section style={styles.exportCard}>
+          <div>
+            <h2 style={styles.sectionTitle}>
+              Export Reports
+            </h2>
+
+            <p
+              style={
+                styles.sectionDescription
+              }
+            >
+              Download the information currently
+              displayed after applying dashboard
+              filters.
+            </p>
+          </div>
+
+          <div style={styles.exportGrid}>
+            <button
+              type="button"
+              onClick={exportComplianceCSV}
+              style={styles.exportButton}
+            >
+              Export Compliance CSV
+            </button>
+
+            <button
+              type="button"
+              onClick={exportCompliancePDF}
+              style={styles.exportButton}
+            >
+              Export Compliance PDF
+            </button>
+
+            <button
+              type="button"
+              onClick={exportAuditCSV}
+              style={styles.exportButton}
+            >
+              Export Audit CSV
+            </button>
+
+            <button
+              type="button"
+              onClick={exportAuditPDF}
+              style={styles.exportButton}
+            >
+              Export Audit PDF
+            </button>
+          </div>
+        </section>
+      ) : (
+        <section style={styles.accessNotice}>
+          <strong>
+            Report exports are unavailable for
+            your access role.
+          </strong>
+
+          <span>
+            You can continue to view the
+            dashboard information permitted for
+            your account.
+          </span>
+        </section>
+      )}
+
+      <section style={styles.filterCard}>
+        <div>
+          <h2 style={styles.sectionTitle}>
+            Dashboard Filters
+          </h2>
+
+          <p
+            style={styles.sectionDescription}
+          >
+            Filter workers and their associated
+            documents by site, role, status and
+            expiry date.
+          </p>
+        </div>
 
         <div style={styles.filterGrid}>
           <select
             value={siteFilter}
             onChange={(event) =>
-              setSiteFilter(event.target.value)
+              setSiteFilter(
+                event.target.value,
+              )
             }
             style={styles.filterInput}
+            aria-label="Filter by site"
           >
-            <option value="all">All Sites</option>
+            <option value="all">
+              All Sites
+            </option>
 
             {sites.map((site) => (
-              <option key={site} value={site}>
+              <option
+                key={site}
+                value={site}
+              >
                 {site}
               </option>
             ))}
@@ -957,14 +1438,22 @@ export default function Dashboard({ profile }) {
           <select
             value={roleFilter}
             onChange={(event) =>
-              setRoleFilter(event.target.value)
+              setRoleFilter(
+                event.target.value,
+              )
             }
             style={styles.filterInput}
+            aria-label="Filter by worker role"
           >
-            <option value="all">All Roles</option>
+            <option value="all">
+              All Roles
+            </option>
 
             {roles.map((role) => (
-              <option key={role} value={role}>
+              <option
+                key={role}
+                value={role}
+              >
                 {role}
               </option>
             ))}
@@ -973,16 +1462,21 @@ export default function Dashboard({ profile }) {
           <select
             value={workerStatusFilter}
             onChange={(event) =>
-              setWorkerStatusFilter(event.target.value)
+              setWorkerStatusFilter(
+                event.target.value,
+              )
             }
             style={styles.filterInput}
+            aria-label="Filter by worker status"
           >
             <option value="all">
               All Worker Statuses
             </option>
+
             <option value="active">
               Active Workers
             </option>
+
             <option value="inactive">
               Inactive Workers
             </option>
@@ -991,19 +1485,25 @@ export default function Dashboard({ profile }) {
           <select
             value={documentStatusFilter}
             onChange={(event) =>
-              setDocumentStatusFilter(event.target.value)
+              setDocumentStatusFilter(
+                event.target.value,
+              )
             }
             style={styles.filterInput}
+            aria-label="Filter by document status"
           >
             <option value="all">
               All Document Statuses
             </option>
+
             <option value="valid">
               Valid Documents
             </option>
+
             <option value="expired">
               Expired Documents
             </option>
+
             <option value="expiring soon">
               Expiring Soon
             </option>
@@ -1013,18 +1513,24 @@ export default function Dashboard({ profile }) {
             type="date"
             value={startDate}
             onChange={(event) =>
-              setStartDate(event.target.value)
+              setStartDate(
+                event.target.value,
+              )
             }
             style={styles.filterInput}
+            aria-label="Expiry start date"
           />
 
           <input
             type="date"
             value={endDate}
             onChange={(event) =>
-              setEndDate(event.target.value)
+              setEndDate(
+                event.target.value,
+              )
             }
             style={styles.filterInput}
+            aria-label="Expiry end date"
           />
 
           <button
@@ -1035,9 +1541,9 @@ export default function Dashboard({ profile }) {
             Reset Filters
           </button>
         </div>
-      </div>
+      </section>
 
-      <div style={styles.statsGrid}>
+      <section style={styles.statsGrid}>
         <StatCard
           title="Total Workers"
           value={filteredWorkers.length}
@@ -1074,7 +1580,9 @@ export default function Dashboard({ profile }) {
           title="Valid Documents"
           value={healthyDocuments.length}
           icon={STATUS_META.valid.icon}
-          accent={STATUS_META.valid.colour}
+          accent={
+            STATUS_META.valid.colour
+          }
           helper="Current and not expiring soon"
         />
 
@@ -1082,15 +1590,24 @@ export default function Dashboard({ profile }) {
           title="Expired Docs"
           value={expiredDocuments.length}
           icon={STATUS_META.expired.icon}
-          accent={STATUS_META.expired.colour}
+          accent={
+            STATUS_META.expired.colour
+          }
           helper="Require immediate attention"
         />
 
         <StatCard
           title="Expiring Soon"
-          value={expiringSoonDocuments.length}
-          icon={STATUS_META.expiringSoon.icon}
-          accent={STATUS_META.expiringSoon.colour}
+          value={
+            expiringSoonDocuments.length
+          }
+          icon={
+            STATUS_META.expiringSoon.icon
+          }
+          accent={
+            STATUS_META.expiringSoon
+              .colour
+          }
           helper={`Due within ${EXPIRY_WARNING_DAYS} days`}
         />
 
@@ -1101,113 +1618,192 @@ export default function Dashboard({ profile }) {
           accent="#a855f7"
           helper="Documents not yet expired"
         />
-      </div>
+      </section>
 
-      <div style={styles.statusGuideCard}>
+      <section style={styles.statusGuideCard}>
         <div>
-          <h3 style={styles.sectionTitle}>Document status guide</h3>
-          <p style={styles.sectionDescription}>
-            The dashboard uses the following indicators throughout charts,
-            alerts and tables.
+          <h2 style={styles.sectionTitle}>
+            Document status guide
+          </h2>
+
+          <p
+            style={styles.sectionDescription}
+          >
+            The dashboard uses these indicators
+            throughout charts, alerts and tables.
           </p>
         </div>
 
         <div style={styles.statusGuideGrid}>
           <StatusLegendItem
-            colour={STATUS_META.valid.colour}
-            background={STATUS_META.valid.background}
+            colour={
+              STATUS_META.valid.colour
+            }
+            background={
+              STATUS_META.valid.background
+            }
             icon={STATUS_META.valid.icon}
             label={STATUS_META.valid.label}
-            description={STATUS_META.valid.description}
+            description={
+              STATUS_META.valid
+                .description
+            }
             count={healthyDocuments.length}
           />
 
           <StatusLegendItem
-            colour={STATUS_META.expiringSoon.colour}
-            background={STATUS_META.expiringSoon.background}
-            icon={STATUS_META.expiringSoon.icon}
-            label={STATUS_META.expiringSoon.label}
-            description={STATUS_META.expiringSoon.description}
-            count={expiringSoonDocuments.length}
+            colour={
+              STATUS_META.expiringSoon
+                .colour
+            }
+            background={
+              STATUS_META.expiringSoon
+                .background
+            }
+            icon={
+              STATUS_META.expiringSoon.icon
+            }
+            label={
+              STATUS_META.expiringSoon.label
+            }
+            description={
+              STATUS_META.expiringSoon
+                .description
+            }
+            count={
+              expiringSoonDocuments.length
+            }
           />
 
           <StatusLegendItem
-            colour={STATUS_META.expired.colour}
-            background={STATUS_META.expired.background}
+            colour={
+              STATUS_META.expired.colour
+            }
+            background={
+              STATUS_META.expired
+                .background
+            }
             icon={STATUS_META.expired.icon}
             label={STATUS_META.expired.label}
-            description={STATUS_META.expired.description}
+            description={
+              STATUS_META.expired
+                .description
+            }
             count={expiredDocuments.length}
           />
         </div>
-      </div>
+      </section>
 
-      <div style={styles.chartGrid}>
+      <section style={styles.chartGrid}>
         <div style={styles.chartCard}>
           <div style={styles.chartHeader}>
             <div>
-              <h3 style={styles.sectionTitle}>Compliance Overview</h3>
-              <p style={styles.sectionDescription}>
-                Distribution of healthy, expiring and expired documents.
+              <h2
+                style={styles.sectionTitle}
+              >
+                Compliance Overview
+              </h2>
+
+              <p
+                style={
+                  styles.sectionDescription
+                }
+              >
+                Distribution of valid, expiring
+                and expired documents.
               </p>
             </div>
 
-            <span style={styles.chartIndicator}>
+            <span
+              style={styles.chartIndicator}
+            >
               ● Live data
             </span>
           </div>
 
-          <ResponsiveContainer width="100%" height={220}>
-            <PieChart>
-              <Pie
-                data={pieData}
-                cx="50%"
-                cy="50%"
-                outerRadius={78}
-                innerRadius={42}
-                paddingAngle={2}
-                dataKey="value"
-                label={({ name, value }) =>
-                  value > 0 ? `${name} (${value})` : ''
-                }
-              >
-                {pieData.map((entry, index) => (
-                  <Cell
-                    key={entry.name}
-                    fill={
-                      CHART_COLORS[
-                        index % CHART_COLORS.length
-                      ]
-                    }
-                  />
-                ))}
-              </Pie>
+          {hasPieData ? (
+            <ResponsiveContainer
+              width="100%"
+              height={240}
+            >
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={78}
+                  innerRadius={42}
+                  paddingAngle={2}
+                  dataKey="value"
+                  label={({
+                    name,
+                    value,
+                  }) =>
+                    value > 0
+                      ? `${name} (${value})`
+                      : ''
+                  }
+                >
+                  {pieData.map(
+                    (entry, index) => (
+                      <Cell
+                        key={entry.name}
+                        fill={
+                          CHART_COLOURS[
+                            index %
+                              CHART_COLOURS.length
+                          ]
+                        }
+                      />
+                    ),
+                  )}
+                </Pie>
 
-              <Tooltip
-                contentStyle={styles.tooltip}
-                formatter={(value, name) => [
-                  value,
-                  name,
-                ]}
-              />
-            </PieChart>
-          </ResponsiveContainer>
+                <Tooltip
+                  contentStyle={
+                    styles.tooltip
+                  }
+                  formatter={(
+                    value,
+                    name,
+                  ) => [value, name]}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <ChartEmptyState message="No document data matches the selected filters." />
+          )}
 
           <div style={styles.inlineLegend}>
             <LegendItem
-              colour={STATUS_META.valid.colour}
+              colour={
+                STATUS_META.valid.colour
+              }
               label="Valid"
-              value={healthyDocuments.length}
+              value={
+                healthyDocuments.length
+              }
             />
+
             <LegendItem
-              colour={STATUS_META.expiringSoon.colour}
+              colour={
+                STATUS_META.expiringSoon
+                  .colour
+              }
               label="Expiring Soon"
-              value={expiringSoonDocuments.length}
+              value={
+                expiringSoonDocuments.length
+              }
             />
+
             <LegendItem
-              colour={STATUS_META.expired.colour}
+              colour={
+                STATUS_META.expired.colour
+              }
               label="Expired"
-              value={expiredDocuments.length}
+              value={
+                expiredDocuments.length
+              }
             />
           </div>
         </div>
@@ -1215,18 +1811,33 @@ export default function Dashboard({ profile }) {
         <div style={styles.chartCard}>
           <div style={styles.chartHeader}>
             <div>
-              <h3 style={styles.sectionTitle}>Workforce Analytics</h3>
-              <p style={styles.sectionDescription}>
-                Side-by-side view of people and document volumes.
+              <h2
+                style={styles.sectionTitle}
+              >
+                Workforce Analytics
+              </h2>
+
+              <p
+                style={
+                  styles.sectionDescription
+                }
+              >
+                Side-by-side view of people and
+                document volumes.
               </p>
             </div>
 
-            <span style={styles.chartIndicator}>
+            <span
+              style={styles.chartIndicator}
+            >
               ▮ Comparison
             </span>
           </div>
 
-          <ResponsiveContainer width="100%" height={250}>
+          <ResponsiveContainer
+            width="100%"
+            height={270}
+          >
             <BarChart data={barData}>
               <CartesianGrid
                 strokeDasharray="3 3"
@@ -1236,7 +1847,7 @@ export default function Dashboard({ profile }) {
               <XAxis
                 dataKey="name"
                 stroke="#94a3b8"
-                tick={{ fontSize: 12 }}
+                tick={{ fontSize: 11 }}
               />
 
               <YAxis
@@ -1244,7 +1855,11 @@ export default function Dashboard({ profile }) {
                 stroke="#94a3b8"
               />
 
-              <Tooltip contentStyle={styles.tooltip} />
+              <Tooltip
+                contentStyle={
+                  styles.tooltip
+                }
+              />
 
               <Bar
                 dataKey="total"
@@ -1255,31 +1870,45 @@ export default function Dashboard({ profile }) {
           </ResponsiveContainer>
 
           <div style={styles.chartNote}>
-            Blue bars show totals after the selected dashboard filters
-            are applied.
+            Blue bars show totals after the
+            selected dashboard filters are
+            applied.
           </div>
         </div>
-      </div>
+      </section>
 
-      <div style={styles.chartCardFull}>
+      <section style={styles.chartCardFull}>
         <div style={styles.chartHeader}>
           <div>
-            <h3 style={styles.sectionTitle}>
-              Compliance Trend Snapshot
-            </h3>
-            <p style={styles.sectionDescription}>
-              A quick visual comparison of the main workforce compliance
-              measures in the current view.
+            <h2 style={styles.sectionTitle}>
+              Compliance Snapshot
+            </h2>
+
+            <p
+              style={
+                styles.sectionDescription
+              }
+            >
+              A comparative view of the main
+              workforce compliance measures in
+              the current dashboard.
             </p>
           </div>
 
-          <span style={styles.chartIndicator}>
+          <span
+            style={styles.chartIndicator}
+          >
             ↗ Snapshot
           </span>
         </div>
 
-        <ResponsiveContainer width="100%" height={250}>
-          <LineChart data={complianceTrendData}>
+        <ResponsiveContainer
+          width="100%"
+          height={260}
+        >
+          <LineChart
+            data={complianceSnapshotData}
+          >
             <CartesianGrid
               strokeDasharray="3 3"
               stroke="#334155"
@@ -1295,7 +1924,9 @@ export default function Dashboard({ profile }) {
               stroke="#94a3b8"
             />
 
-            <Tooltip contentStyle={styles.tooltip} />
+            <Tooltip
+              contentStyle={styles.tooltip}
+            />
 
             <Line
               type="monotone"
@@ -1314,113 +1945,247 @@ export default function Dashboard({ profile }) {
         </ResponsiveContainer>
 
         <div style={styles.chartNote}>
-          This is a comparative snapshot, not a time-series history.
+          This is a comparative snapshot, not a
+          historical time-series chart.
         </div>
-      </div>
+      </section>
 
-      <div style={styles.alertCard}>
-        <h3>Compliance Alerts</h3>
+      <section style={styles.alertCard}>
+        <h2 style={styles.sectionTitle}>
+          Compliance Alerts
+        </h2>
+
+        <p style={styles.sectionDescription}>
+          Current compliance issues within the
+          selected dashboard filters.
+        </p>
 
         {expiredDocuments.length > 0 && (
           <div style={styles.alertDanger}>
-            {expiredDocuments.length} expired document(s)
+            <strong>
+              {expiredDocuments.length}{' '}
+              expired document
+              {expiredDocuments.length === 1
+                ? ''
+                : 's'}
+            </strong>{' '}
             require immediate attention.
           </div>
         )}
 
-        {expiringSoonDocuments.length > 0 && (
+        {expiringSoonDocuments.length >
+          0 && (
           <div style={styles.alertWarning}>
-            {expiringSoonDocuments.length} document(s)
-            expire within {EXPIRY_WARNING_DAYS} days.
+            <strong>
+              {
+                expiringSoonDocuments.length
+              }{' '}
+              document
+              {expiringSoonDocuments.length ===
+              1
+                ? ''
+                : 's'}
+            </strong>{' '}
+            expire within{' '}
+            {EXPIRY_WARNING_DAYS} days.
           </div>
         )}
 
         {expiredDocuments.length === 0 &&
-          expiringSoonDocuments.length === 0 && (
-            <div style={styles.alertSuccess}>
-              All compliance documents are up to date.
+          expiringSoonDocuments.length ===
+            0 && (
+            <div
+              style={styles.alertSuccess}
+            >
+              All documents in the current view
+              are up to date.
             </div>
           )}
-      </div>
+      </section>
 
-      <div style={styles.recentCard}>
-        <h3>Recent Documents</h3>
+      <section style={styles.recentCard}>
+        <div>
+          <h2 style={styles.sectionTitle}>
+            Recent Documents
+          </h2>
+
+          <p
+            style={styles.sectionDescription}
+          >
+            The five most recently uploaded
+            document records matching the
+            selected filters.
+          </p>
+        </div>
 
         {recentDocuments.length === 0 ? (
           <p style={styles.emptyText}>
-            No documents match the selected filters.
+            No documents match the selected
+            filters.
           </p>
         ) : (
           <div style={styles.tableWrapper}>
             <table style={styles.table}>
               <thead>
                 <tr>
-                  <th style={styles.th}>Worker</th>
-                  <th style={styles.th}>Document</th>
-                  <th style={styles.th}>Expiry Date</th>
-                  <th style={styles.th}>Status</th>
-                  <th style={styles.th}>Warning</th>
+                  <th style={styles.th}>
+                    Worker
+                  </th>
+
+                  <th style={styles.th}>
+                    Document
+                  </th>
+
+                  <th style={styles.th}>
+                    Expiry Date
+                  </th>
+
+                  <th style={styles.th}>
+                    Status
+                  </th>
+
+                  <th style={styles.th}>
+                    Time Remaining
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
-                {recentDocuments.map((document) => {
-                  const worker =
-                    getWorkerForDocument(document)
+                {recentDocuments.map(
+                  (documentRecord) => {
+                    const worker =
+                      getWorkerForDocument(
+                        documentRecord,
+                      )
 
-                  return (
-                    <tr key={document.id}>
-                      <td style={styles.td}>
-                        {worker?.full_name || '-'}
-                      </td>
+                    return (
+                      <tr
+                        key={
+                          documentRecord.id
+                        }
+                      >
+                        <td style={styles.td}>
+                          {worker?.full_name ||
+                            '-'}
+                        </td>
 
-                      <td style={styles.td}>
-                        {document.document_type}
-                      </td>
+                        <td style={styles.td}>
+                          {documentRecord.document_type ||
+                            '-'}
+                        </td>
 
-                      <td style={styles.td}>
-                        {document.expiry_date || '-'}
-                      </td>
+                        <td style={styles.td}>
+                          {formatExpiryDate(
+                            documentRecord.expiry_date,
+                          )}
+                        </td>
 
-                      <td style={styles.td}>
-                        <span
-                          style={{
-                            ...styles.badge,
-                            ...(document.status ===
-                            'expired'
-                              ? styles.expiredBadge
-                              : document.expiringSoon
-                                ? styles.warningBadge
-                                : styles.validBadge),
-                          }}
-                        >
-                          {document.status === 'expired'
-                            ? 'expired'
-                            : document.expiringSoon
-                              ? 'expiring soon'
-                              : 'valid'}
-                        </span>
-                      </td>
+                        <td style={styles.td}>
+                          <DocumentStatusBadge
+                            status={
+                              documentRecord.displayStatus
+                            }
+                          />
+                        </td>
 
-                      <td style={styles.td}>
-                        {document.expiringSoon ? (
-                          <span
-                            style={styles.warningBadge}
-                          >
-                            expiring soon
-                          </span>
-                        ) : (
-                          '-'
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
+                        <td style={styles.td}>
+                          <ExpiryText
+                            documentRecord={
+                              documentRecord
+                            }
+                          />
+                        </td>
+                      </tr>
+                    )
+                  },
+                )}
               </tbody>
             </table>
           </div>
         )}
+      </section>
+    </div>
+  )
+}
+
+function ExpiryText({ documentRecord }) {
+  const days =
+    documentRecord.daysUntilExpiry
+
+  if (days === null) {
+    return (
+      <span style={styles.mutedText}>
+        No expiry date
+      </span>
+    )
+  }
+
+  if (days < 0) {
+    const overdueDays = Math.abs(days)
+
+    return (
+      <span style={styles.expiredText}>
+        Expired {overdueDays}{' '}
+        day{overdueDays === 1 ? '' : 's'} ago
+      </span>
+    )
+  }
+
+  if (days === 0) {
+    return (
+      <span style={styles.warningText}>
+        Expires today
+      </span>
+    )
+  }
+
+  if (days <= EXPIRY_WARNING_DAYS) {
+    return (
+      <span style={styles.warningText}>
+        {days} day{days === 1 ? '' : 's'}{' '}
+        remaining
+      </span>
+    )
+  }
+
+  return (
+    <span style={styles.validText}>
+      {days} day{days === 1 ? '' : 's'}{' '}
+      remaining
+    </span>
+  )
+}
+
+function DocumentStatusBadge({ status }) {
+  const badgeStyle =
+    status === 'expired'
+      ? styles.expiredBadge
+      : status === 'expiring soon'
+        ? styles.warningBadge
+        : styles.validBadge
+
+  return (
+    <span
+      style={{
+        ...styles.badge,
+        ...badgeStyle,
+      }}
+    >
+      {status}
+    </span>
+  )
+}
+
+function ChartEmptyState({ message }) {
+  return (
+    <div style={styles.chartEmptyState}>
+      <div style={styles.chartEmptyIcon}>
+        ◫
       </div>
+
+      <strong>No chart data</strong>
+
+      <span>{message}</span>
     </div>
   )
 }
@@ -1433,7 +2198,7 @@ function StatCard({
   helper,
 }) {
   return (
-    <div style={styles.card}>
+    <article style={styles.card}>
       <div
         style={{
           ...styles.statIcon,
@@ -1447,17 +2212,29 @@ function StatCard({
       </div>
 
       <div>
-        <h2 style={styles.cardValue}>{value}</h2>
-        <p style={styles.cardTitle}>{title}</p>
+        <div style={styles.cardValue}>
+          {value}
+        </div>
+
+        <div style={styles.cardTitle}>
+          {title}
+        </div>
+
         {helper && (
-          <p style={styles.cardHelper}>{helper}</p>
+          <p style={styles.cardHelper}>
+            {helper}
+          </p>
         )}
       </div>
-    </div>
+    </article>
   )
 }
 
-function LegendItem({ colour, label, value }) {
+function LegendItem({
+  colour,
+  label,
+  value,
+}) {
   return (
     <div style={styles.legendItem}>
       <span
@@ -1467,8 +2244,12 @@ function LegendItem({ colour, label, value }) {
           background: colour,
         }}
       />
+
       <span>{label}</span>
-      <strong style={styles.legendValue}>{value}</strong>
+
+      <strong style={styles.legendValue}>
+        {value}
+      </strong>
     </div>
   )
 }
@@ -1482,7 +2263,7 @@ function StatusLegendItem({
   count,
 }) {
   return (
-    <div style={styles.statusLegendItem}>
+    <article style={styles.statusLegendItem}>
       <div
         style={{
           ...styles.statusLegendIcon,
@@ -1496,8 +2277,13 @@ function StatusLegendItem({
       </div>
 
       <div style={styles.statusLegendContent}>
-        <div style={styles.statusLegendTitleRow}>
+        <div
+          style={
+            styles.statusLegendTitleRow
+          }
+        >
           <strong>{label}</strong>
+
           <span
             style={{
               ...styles.statusCount,
@@ -1510,17 +2296,21 @@ function StatusLegendItem({
           </span>
         </div>
 
-        <span style={styles.statusLegendDescription}>
+        <span
+          style={
+            styles.statusLegendDescription
+          }
+        >
           {description}
         </span>
       </div>
-    </div>
+    </article>
   )
 }
 
 const styles = {
   container: {
-    padding: '32px',
+    padding: '28px',
     color: '#ffffff',
     background: '#020617',
     minHeight: '100vh',
@@ -1529,20 +2319,30 @@ const styles = {
   headerRow: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flexWrap: 'wrap',
     gap: '20px',
     marginBottom: '24px',
   },
 
+  eyebrow: {
+    margin: '0 0 7px',
+    color: '#60a5fa',
+    fontSize: '12px',
+    fontWeight: 800,
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase',
+  },
+
   heading: {
-    marginTop: 0,
-    marginBottom: '6px',
+    margin: 0,
+    fontSize: '26px',
   },
 
   subText: {
     color: '#94a3b8',
-    margin: 0,
+    margin: '8px 0 0',
+    lineHeight: 1.6,
   },
 
   refreshButton: {
@@ -1551,7 +2351,7 @@ const styles = {
     border: 'none',
     padding: '12px 18px',
     borderRadius: '10px',
-    fontWeight: 'bold',
+    fontWeight: 700,
     cursor: 'pointer',
   },
 
@@ -1560,30 +2360,52 @@ const styles = {
     opacity: 0.65,
   },
 
+  inlineError: {
+    padding: '14px 16px',
+    border: '1px solid #7f1d1d',
+    borderRadius: '12px',
+    background: '#450a0a',
+    color: '#fecaca',
+    marginBottom: '24px',
+  },
+
   exportCard: {
     background: '#0f172a',
     border: '1px solid #1e293b',
     borderRadius: '14px',
     padding: '20px',
-    marginBottom: '30px',
+    marginBottom: '24px',
   },
 
   exportGrid: {
     display: 'grid',
     gridTemplateColumns:
-      'repeat(auto-fit, minmax(220px, 1fr))',
+      'repeat(auto-fit, minmax(210px, 1fr))',
     gap: '14px',
     marginTop: '16px',
   },
 
   exportButton: {
+    minHeight: '44px',
     padding: '12px',
     borderRadius: '10px',
     border: 'none',
     background: '#2563eb',
     color: '#ffffff',
-    fontWeight: 'bold',
+    fontWeight: 700,
     cursor: 'pointer',
+  },
+
+  accessNotice: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '5px',
+    padding: '16px',
+    border: '1px solid #334155',
+    borderRadius: '14px',
+    background: '#0f172a',
+    color: '#cbd5e1',
+    marginBottom: '24px',
   },
 
   filterCard: {
@@ -1591,40 +2413,44 @@ const styles = {
     border: '1px solid #1e293b',
     borderRadius: '14px',
     padding: '20px',
-    marginBottom: '30px',
+    marginBottom: '24px',
   },
 
   filterGrid: {
     display: 'grid',
     gridTemplateColumns:
-      'repeat(auto-fit, minmax(190px, 1fr))',
+      'repeat(auto-fit, minmax(175px, 1fr))',
     gap: '14px',
     marginTop: '16px',
   },
 
   filterInput: {
-    padding: '12px',
+    minHeight: '44px',
+    padding: '11px 12px',
     borderRadius: '10px',
     border: '1px solid #334155',
     background: '#1e293b',
     color: '#ffffff',
+    width: '100%',
+    boxSizing: 'border-box',
   },
 
   resetButton: {
+    minHeight: '44px',
     padding: '12px',
     borderRadius: '10px',
     border: 'none',
     background: '#475569',
     color: '#ffffff',
-    fontWeight: 'bold',
+    fontWeight: 700,
     cursor: 'pointer',
   },
 
   statsGrid: {
     display: 'grid',
     gridTemplateColumns:
-      'repeat(auto-fit, minmax(220px, 1fr))',
-    gap: '20px',
+      'repeat(auto-fit, minmax(190px, 1fr))',
+    gap: '16px',
     marginBottom: '24px',
   },
 
@@ -1632,11 +2458,12 @@ const styles = {
     background: '#0f172a',
     border: '1px solid #1e293b',
     borderRadius: '14px',
-    padding: '20px',
+    padding: '18px',
     display: 'flex',
     alignItems: 'flex-start',
     gap: '14px',
-    minHeight: '112px',
+    minHeight: '110px',
+    boxSizing: 'border-box',
   },
 
   statIcon: {
@@ -1653,13 +2480,13 @@ const styles = {
   },
 
   cardValue: {
-    marginTop: 0,
-    marginBottom: '4px',
+    margin: 0,
     fontSize: '24px',
+    fontWeight: 800,
   },
 
   cardTitle: {
-    margin: 0,
+    marginTop: '4px',
     fontWeight: 700,
   },
 
@@ -1675,7 +2502,7 @@ const styles = {
     border: '1px solid #1e293b',
     borderRadius: '14px',
     padding: '20px',
-    marginBottom: '30px',
+    marginBottom: '24px',
   },
 
   statusGuideGrid: {
@@ -1744,7 +2571,7 @@ const styles = {
     gridTemplateColumns:
       'repeat(auto-fit, minmax(320px, 1fr))',
     gap: '20px',
-    marginBottom: '30px',
+    marginBottom: '24px',
   },
 
   chartCard: {
@@ -1753,6 +2580,7 @@ const styles = {
     borderRadius: '14px',
     padding: '20px',
     minHeight: '390px',
+    boxSizing: 'border-box',
   },
 
   chartCardFull: {
@@ -1761,7 +2589,8 @@ const styles = {
     borderRadius: '14px',
     padding: '20px',
     minHeight: '390px',
-    marginBottom: '30px',
+    marginBottom: '24px',
+    boxSizing: 'border-box',
   },
 
   chartHeader: {
@@ -1775,6 +2604,7 @@ const styles = {
 
   sectionTitle: {
     margin: 0,
+    fontSize: '18px',
   },
 
   sectionDescription: {
@@ -1795,6 +2625,29 @@ const styles = {
     color: '#93c5fd',
     fontSize: '12px',
     fontWeight: 700,
+  },
+
+  chartEmptyState: {
+    height: '240px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    color: '#94a3b8',
+    textAlign: 'center',
+  },
+
+  chartEmptyIcon: {
+    width: '46px',
+    height: '46px',
+    borderRadius: '999px',
+    background: '#1e293b',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#60a5fa',
+    fontSize: '20px',
   },
 
   inlineLegend: {
@@ -1844,7 +2697,7 @@ const styles = {
     border: '1px solid #1e293b',
     borderRadius: '14px',
     padding: '20px',
-    marginBottom: '30px',
+    marginBottom: '24px',
   },
 
   alertDanger: {
@@ -1880,6 +2733,8 @@ const styles = {
 
   emptyText: {
     color: '#94a3b8',
+    padding: '30px 0 10px',
+    textAlign: 'center',
   },
 
   tableWrapper: {
@@ -1912,7 +2767,7 @@ const styles = {
     padding: '6px 10px',
     borderRadius: '999px',
     fontSize: '12px',
-    fontWeight: 'bold',
+    fontWeight: 700,
     textTransform: 'capitalize',
   },
 
@@ -1929,10 +2784,26 @@ const styles = {
   warningBadge: {
     background: '#78350f',
     color: '#fde68a',
-    padding: '6px 10px',
-    borderRadius: '999px',
-    fontSize: '12px',
-    fontWeight: 'bold',
+  },
+
+  validText: {
+    color: '#86efac',
+    fontSize: '13px',
+  },
+
+  warningText: {
+    color: '#fde68a',
+    fontSize: '13px',
+  },
+
+  expiredText: {
+    color: '#fca5a5',
+    fontSize: '13px',
+  },
+
+  mutedText: {
+    color: '#94a3b8',
+    fontSize: '13px',
   },
 
   errorPanel: {
@@ -1943,6 +2814,48 @@ const styles = {
     borderRadius: '12px',
     background: '#450a0a',
     color: '#fecaca',
+    textAlign: 'center',
+  },
+
+  loadingPanel: {
+    maxWidth: '640px',
+    margin: '80px auto',
+    padding: '24px',
+    border: '1px solid #334155',
+    borderRadius: '12px',
+    background: '#0f172a',
+    color: '#cbd5e1',
+    textAlign: 'center',
+  },
+
+  loadingPage: {
+    minHeight: 'calc(100vh - 72px)',
+    padding: '24px',
+    background: '#020617',
+    color: '#ffffff',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  loadingSpinner: {
+    width: '38px',
+    height: '38px',
+    border: '4px solid #1e293b',
+    borderTopColor: '#3b82f6',
+    borderRadius: '999px',
+    animation:
+      'trustera-dashboard-spin 0.8s linear infinite',
+  },
+
+  loadingTitle: {
+    margin: '18px 0 0',
+  },
+
+  loadingText: {
+    margin: '8px 0 0',
+    color: '#94a3b8',
     textAlign: 'center',
   },
 }

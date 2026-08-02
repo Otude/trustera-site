@@ -186,7 +186,6 @@ export default function TeamManagement({ profile, session }) {
 
   const [searchTerm, setSearchTerm] = useState('')
   const [roleFilter, setRoleFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
 
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
@@ -272,9 +271,7 @@ export default function TeamManagement({ profile, session }) {
                 email,
                 full_name,
                 role,
-                status,
-                created_at,
-                updated_at
+                created_at
               `,
             )
             .eq('company_id', companyId)
@@ -401,30 +398,13 @@ export default function TeamManagement({ profile, session }) {
     [invitations],
   )
 
-  const activeMembers = useMemo(
-    () =>
-      members.filter(
-        (member) =>
-          normaliseStatus(member.status) !== 'suspended',
-      ),
-    [members],
-  )
-
-  const suspendedMembers = useMemo(
-    () =>
-      members.filter(
-        (member) =>
-          normaliseStatus(member.status) === 'suspended',
-      ),
-    [members],
-  )
+  const activeMembers = members
 
   const filteredMembers = useMemo(() => {
     const search = searchTerm.trim().toLowerCase()
 
     return members.filter((member) => {
       const role = normaliseRole(member.role)
-      const status = normaliseStatus(member.status)
 
       const matchesSearch =
         !search ||
@@ -441,13 +421,9 @@ export default function TeamManagement({ profile, session }) {
       const matchesRole =
         roleFilter === 'all' || role === roleFilter
 
-      const matchesStatus =
-        statusFilter === 'all' ||
-        status === statusFilter
-
-      return matchesSearch && matchesRole && matchesStatus
+      return matchesSearch && matchesRole
     })
-  }, [members, roleFilter, searchTerm, statusFilter])
+  }, [members, roleFilter, searchTerm])
 
   function handleInviteChange(event) {
     const { name, value } = event.target
@@ -626,10 +602,7 @@ export default function TeamManagement({ profile, session }) {
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({
-          role,
-          updated_at: new Date().toISOString(),
-        })
+        .update({ role })
         .eq('id', member.id)
         .eq('company_id', companyId)
 
@@ -656,7 +629,6 @@ export default function TeamManagement({ profile, session }) {
             ? {
                 ...item,
                 role,
-                updated_at: new Date().toISOString(),
               }
             : item,
         ),
@@ -673,107 +645,6 @@ export default function TeamManagement({ profile, session }) {
       setErrorMessage(
         error?.message ||
           'The user’s role could not be updated.',
-      )
-    } finally {
-      setUpdatingMemberId(null)
-    }
-  }
-
-  async function handleStatusToggle(member) {
-    if (
-      !canManageTeam ||
-      updatingMemberId ||
-      !companyId
-    ) {
-      return
-    }
-
-    if (member.id === currentUserId) {
-      setErrorMessage(
-        'You cannot suspend your own account.',
-      )
-      return
-    }
-
-    const currentStatus = normaliseStatus(member.status)
-    const nextStatus =
-      currentStatus === 'suspended'
-        ? 'active'
-        : 'suspended'
-
-    const actionWord =
-      nextStatus === 'suspended'
-        ? 'suspend'
-        : 'reactivate'
-
-    const confirmed = window.confirm(
-      `Are you sure you want to ${actionWord} ${
-        member.full_name || member.email
-      }?`,
-    )
-
-    if (!confirmed) return
-
-    clearMessages()
-    setUpdatingMemberId(member.id)
-
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          status: nextStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', member.id)
-        .eq('company_id', companyId)
-
-      if (error) {
-        throw error
-      }
-
-      await recordAuditLog({
-        action:
-          nextStatus === 'suspended'
-            ? 'User Suspended'
-            : 'User Reactivated',
-        entityType: 'profile',
-        entityId: member.id,
-        entityName:
-          member.full_name || member.email,
-        details: {
-          email: member.email,
-          previous_status: currentStatus,
-          new_status: nextStatus,
-        },
-      })
-
-      setMembers((previous) =>
-        previous.map((item) =>
-          item.id === member.id
-            ? {
-                ...item,
-                status: nextStatus,
-                updated_at: new Date().toISOString(),
-              }
-            : item,
-        ),
-      )
-
-      setSuccessMessage(
-        `${
-          member.full_name || member.email
-        } has been ${
-          nextStatus === 'suspended'
-            ? 'suspended'
-            : 'reactivated'
-        }.`,
-      )
-    } catch (error) {
-      console.error('Status update failed:', error)
-
-      setErrorMessage(
-        error?.message ||
-          'The user’s status could not be updated.',
       )
     } finally {
       setUpdatingMemberId(null)
@@ -1219,7 +1090,7 @@ export default function TeamManagement({ profile, session }) {
             </div>
 
             <div className="mt-2 text-3xl font-bold text-red-300">
-              {suspendedMembers.length}
+              0
             </div>
 
             <div className="mt-2 text-xs text-slate-500">
@@ -1289,31 +1160,6 @@ export default function TeamManagement({ profile, session }) {
                 </select>
               </div>
 
-              <div>
-                <label
-                  htmlFor="team-status-filter"
-                  className="sr-only"
-                >
-                  Filter by status
-                </label>
-
-                <select
-                  id="team-status-filter"
-                  value={statusFilter}
-                  onChange={(event) =>
-                    setStatusFilter(event.target.value)
-                  }
-                  className="min-h-[44px] w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm outline-none transition focus:border-blue-500"
-                >
-                  <option value="all">
-                    All statuses
-                  </option>
-                  <option value="active">Active</option>
-                  <option value="suspended">
-                    Suspended
-                  </option>
-                </select>
-              </div>
             </div>
           </div>
 
@@ -1362,9 +1208,6 @@ export default function TeamManagement({ profile, session }) {
                     {filteredMembers.map((member) => {
                       const role = normaliseRole(
                         member.role,
-                      )
-                      const status = normaliseStatus(
-                        member.status,
                       )
                       const isCurrentUser =
                         member.id === currentUserId
@@ -1442,15 +1285,8 @@ export default function TeamManagement({ profile, session }) {
                           </td>
 
                           <td className="px-4 py-4">
-                            <span
-                              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold capitalize ${
-                                STATUS_BADGE_CLASSES[
-                                  status
-                                ] ||
-                                STATUS_BADGE_CLASSES.active
-                              }`}
-                            >
-                              {status}
+                            <span className="inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-200">
+                              Active
                             </span>
                           </td>
 
@@ -1461,38 +1297,14 @@ export default function TeamManagement({ profile, session }) {
                           </td>
 
                           <td className="px-4 py-4">
-                            <div className="flex justify-end gap-2">
-                              {canManageTeam &&
-                                !isCurrentUser && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleStatusToggle(
-                                        member,
-                                      )
-                                    }
-                                    disabled={isUpdating}
-                                    className={`inline-flex min-h-[40px] items-center justify-center rounded-xl px-4 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                                      status ===
-                                      'suspended'
-                                        ? 'bg-emerald-600 text-white hover:bg-emerald-500'
-                                        : 'bg-red-600 text-white hover:bg-red-500'
-                                    }`}
-                                  >
-                                    {isUpdating
-                                      ? 'Updating...'
-                                      : status ===
-                                          'suspended'
-                                        ? 'Reactivate'
-                                        : 'Suspend'}
-                                  </button>
-                                )}
-
-                              {isCurrentUser && (
-                                <span className="text-xs text-slate-500">
-                                  Current account
-                                </span>
-                              )}
+                            <div className="flex justify-end">
+                              <span className="text-xs text-slate-500">
+                                {isCurrentUser
+                                  ? 'Current account'
+                                  : canManageTeam
+                                    ? 'Role can be changed'
+                                    : 'No actions available'}
+                              </span>
                             </div>
                           </td>
                         </tr>

@@ -40,7 +40,7 @@ export const PERMISSIONS = {
     manageDocuments: false,
     viewNotifications: true,
     viewAuditLogs: false,
-    exportReports: true,
+    exportReports: false,
     manageTeam: false,
   },
 
@@ -54,10 +54,17 @@ export const PERMISSIONS = {
   },
 }
 
-export function can(profile, permission) {
-  if (!profile?.role) return false
-
-  return Boolean(
-    PERMISSIONS[profile.role]?.[permission],
+export function getPermissions(role) {
+  return (
+    PERMISSIONS[String(role || '').toLowerCase()] ||
+    PERMISSIONS.worker
   )
+}
+
+export function can(profile, permission) {
+  if (!profile) return false
+
+  const permissions = getPermissions(profile.role)
+
+  return Boolean(permissions[permission])
 }
