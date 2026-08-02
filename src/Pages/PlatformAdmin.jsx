@@ -111,7 +111,7 @@ function getLeadStatusStyle(status) {
   return styles.statusPending
 }
 
-export default function PlatformAdmin({ profile }) {
+export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
   const [companies, setCompanies] = useState([])
   const [profiles, setProfiles] = useState([])
   const [leads, setLeads] = useState([])
@@ -135,13 +135,13 @@ export default function PlatformAdmin({ profile }) {
   const [selectedCompany, setSelectedCompany] =
     useState(null)
 
-  const isPlatformAdmin =
-    normaliseRole(profile?.role) ===
-    'platform_admin'
+  const hasPlatformAdminAccess =
+    Boolean(isPlatformAdmin) ||
+    normaliseRole(profile?.role) === 'platform_admin'
 
   const fetchPlatformData = useCallback(
     async ({ showLoading = true } = {}) => {
-      if (!isPlatformAdmin) return
+      if (!hasPlatformAdminAccess) return
 
       if (showLoading) {
         setLoading(true)
@@ -241,7 +241,7 @@ export default function PlatformAdmin({ profile }) {
         setRefreshing(false)
       }
     },
-    [isPlatformAdmin],
+    [hasPlatformAdminAccess],
   )
 
   useEffect(() => {
@@ -249,7 +249,7 @@ export default function PlatformAdmin({ profile }) {
   }, [fetchPlatformData])
 
   useEffect(() => {
-    if (!isPlatformAdmin) return undefined
+    if (!hasPlatformAdminAccess) return undefined
 
     const companiesChannel = supabase
       .channel('platform-admin-companies')
@@ -307,7 +307,7 @@ export default function PlatformAdmin({ profile }) {
       supabase.removeChannel(profilesChannel)
       supabase.removeChannel(leadsChannel)
     }
-  }, [fetchPlatformData, isPlatformAdmin])
+  }, [fetchPlatformData, hasPlatformAdminAccess])
 
   const companyRows = useMemo(() => {
     return companies.map((company) => {
@@ -746,7 +746,7 @@ export default function PlatformAdmin({ profile }) {
     })
   }
 
-  if (!isPlatformAdmin) {
+  if (!hasPlatformAdminAccess) {
     return (
       <AccessDenied
         profileRole={profile?.role}

@@ -35,9 +35,7 @@ const PROFILE_FIELDS = `
   email,
   full_name,
   role,
-  status,
-  created_at,
-  updated_at
+  created_at
 `
 
 const COMPANY_ROLES = [
@@ -49,12 +47,6 @@ const COMPANY_ROLES = [
   'worker',
 ]
 
-const BLOCKED_ACCOUNT_STATUSES = [
-  'suspended',
-  'inactive',
-  'disabled',
-]
-
 function normaliseRole(role) {
   const value = String(role || '')
     .trim()
@@ -63,20 +55,6 @@ function normaliseRole(role) {
   return COMPANY_ROLES.includes(value)
     ? value
     : 'staff'
-}
-
-function normaliseStatus(status) {
-  const value = String(status || '')
-    .trim()
-    .toLowerCase()
-
-  return value || 'active'
-}
-
-function isBlockedStatus(status) {
-  return BLOCKED_ACCOUNT_STATUSES.includes(
-    normaliseStatus(status),
-  )
 }
 
 export default function App() {
@@ -119,7 +97,7 @@ export default function App() {
 
       if (error) {
         /*
-         * Invitation acceptance should not block
+         * Invitation acceptance must not block
          * an otherwise valid user from signing in.
          */
         console.error(
@@ -174,22 +152,31 @@ export default function App() {
         const profileData =
           profileResponse.data || null
 
+        /*
+         * A user must have either:
+         *
+         * 1. A company profile, or
+         * 2. A record in platform_admins.
+         */
         if (!profileData && !platformAdmin) {
           throw new Error(
             'Your Trustera user profile could not be found. Contact your organisation administrator.',
           )
         }
 
+        /*
+         * Normal company users use their profile
+         * record.
+         *
+         * A platform administrator can still sign
+         * in even if no company profile exists.
+         */
         const normalisedProfile = profileData
           ? {
               ...profileData,
 
               role: normaliseRole(
                 profileData.role,
-              ),
-
-              status: normaliseStatus(
-                profileData.status,
               ),
 
               is_platform_admin:
@@ -202,35 +189,25 @@ export default function App() {
 
               full_name:
                 user.user_metadata
-                  ?.full_name || '',
+                  ?.full_name ||
+                user.user_metadata
+                  ?.name ||
+                '',
 
               role: 'staff',
-              status: 'active',
 
               created_at:
                 user.created_at || null,
 
-              updated_at: null,
-
               is_platform_admin: true,
             }
-
-        if (
-          isBlockedStatus(
-            normalisedProfile.status,
-          )
-        ) {
-          throw new Error(
-            'Your Trustera account is currently suspended. Contact your company administrator.',
-          )
-        }
 
         /*
          * Ordinary company users must belong to
          * a company.
          *
-         * A platform administrator may exist
-         * without a company assignment.
+         * Platform administrators are allowed to
+         * exist without a company assignment.
          */
         if (
           !normalisedProfile.company_id &&
@@ -242,11 +219,12 @@ export default function App() {
         }
 
         /*
-         * Once authentication and profile validation
-         * are successful, mark any pending invitation
-         * linked to this auth user as accepted.
+         * Once authentication and access validation
+         * succeed, mark any matching pending
+         * invitation as accepted.
          *
-         * This is intentionally non-blocking.
+         * This operation is intentionally
+         * non-blocking.
          */
         await markInvitationAsAccepted(
           user.id,
@@ -254,6 +232,7 @@ export default function App() {
 
         if (isMounted) {
           setProfile(normalisedProfile)
+
           setIsPlatformAdmin(
             platformAdmin,
           )
@@ -353,8 +332,9 @@ export default function App() {
             setLoading(true)
 
             /*
-             * Deferring this prevents conflicts
-             * with Supabase auth state processing.
+             * Defer database queries until
+             * Supabase completes its internal
+             * authentication state processing.
              */
             window.setTimeout(
               async () => {
@@ -501,6 +481,14 @@ function AuthenticatedApp({
       'compliance_officer',
     ].includes(role)
 
+  /*
+   * A platform administrator without a company
+   * opens the platform administration page.
+   *
+   * A platform administrator who also belongs to
+   * a company opens the company dashboard by
+   * default but may still visit /platform-admin.
+   */
   const defaultAuthenticatedRoute =
     isPlatformAdmin && !hasCompany
       ? '/platform-admin'
@@ -559,7 +547,11 @@ function AuthenticatedApp({
               />
             ) : (
               <Navigate
-                to="/dashboard"
+                to={
+                  hasCompany
+                    ? '/dashboard'
+                    : '/'
+                }
                 replace
               />
             )
@@ -573,9 +565,14 @@ function AuthenticatedApp({
               <Dashboard
                 profile={profile}
               />
-            ) : (
+            ) : isPlatformAdmin ? (
               <Navigate
                 to="/platform-admin"
+                replace
+              />
+            ) : (
+              <Navigate
+                to="/"
                 replace
               />
             )
@@ -589,9 +586,14 @@ function AuthenticatedApp({
               <Workers
                 profile={profile}
               />
-            ) : (
+            ) : isPlatformAdmin ? (
               <Navigate
                 to="/platform-admin"
+                replace
+              />
+            ) : (
+              <Navigate
+                to="/"
                 replace
               />
             )
@@ -605,9 +607,14 @@ function AuthenticatedApp({
               <WorkerProfile
                 profile={profile}
               />
-            ) : (
+            ) : isPlatformAdmin ? (
               <Navigate
                 to="/platform-admin"
+                replace
+              />
+            ) : (
+              <Navigate
+                to="/"
                 replace
               />
             )
@@ -626,7 +633,9 @@ function AuthenticatedApp({
                 to={
                   hasCompany
                     ? '/workers'
-                    : '/platform-admin'
+                    : isPlatformAdmin
+                      ? '/platform-admin'
+                      : '/'
                 }
                 replace
               />
@@ -641,9 +650,14 @@ function AuthenticatedApp({
               <Documents
                 profile={profile}
               />
-            ) : (
+            ) : isPlatformAdmin ? (
               <Navigate
                 to="/platform-admin"
+                replace
+              />
+            ) : (
+              <Navigate
+                to="/"
                 replace
               />
             )
@@ -657,9 +671,14 @@ function AuthenticatedApp({
               <Notifications
                 profile={profile}
               />
-            ) : (
+            ) : isPlatformAdmin ? (
               <Navigate
                 to="/platform-admin"
+                replace
+              />
+            ) : (
+              <Navigate
+                to="/"
                 replace
               />
             )
@@ -678,7 +697,9 @@ function AuthenticatedApp({
                 to={
                   hasCompany
                     ? '/dashboard'
-                    : '/platform-admin'
+                    : isPlatformAdmin
+                      ? '/platform-admin'
+                      : '/'
                 }
                 replace
               />
@@ -699,7 +720,9 @@ function AuthenticatedApp({
                 to={
                   hasCompany
                     ? '/dashboard'
-                    : '/platform-admin'
+                    : isPlatformAdmin
+                      ? '/platform-admin'
+                      : '/'
                 }
                 replace
               />
