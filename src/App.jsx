@@ -79,31 +79,185 @@ export default function App() {
     setProfileError('')
   }, [])
 
-  const markInvitationAsAccepted =
-    useCallback(async (userId) => {
-      if (!userId) return
+  const syncInvitationAndProfile =
+    useCallback(async (user, profileData) => {
+      if (!user?.id) {
+        return profileData
+      }
 
-      const acceptedAt =
-        new Date().toISOString()
+      const userEmail = String(
+        user.email || profileData?.email || '',
+      )
+        .trim()
+        .toLowerCase()
 
-      const { error } = await supabase
-        .from('company_invitations')
-        .update({
+      if (!userEmail) {
+        return profileData
+      }
+
+      try {
+        const { data: invitation, error: invitationError } =
+          await supabase
+            .from('company_invitations')
+            .select(
+              `
+                id,
+                company_id,
+                email,
+                full_name,
+                role,
+                status,
+                auth_user_id,
+                accepted_at
+              `,
+            )
+            .ilike('email', userEmail)
+            .in('status', ['pending', 'accepted'])
+            .order('created_at', {
+              ascending: false,
+            })
+            .limit(1)
+            .maybeSingle()
+
+        if (invitationError) {
+          throw invitationError
+        }
+
+        if (!invitation) {
+          return profileData
+        }
+
+        const acceptedAt =
+          invitation.accepted_at ||
+          new Date().toISOString()
+
+        const invitationUpdates = {
+          auth_user_id: user.id,
           status: 'accepted',
           accepted_at: acceptedAt,
-        })
-        .eq('auth_user_id', userId)
-        .eq('status', 'pending')
+          updated_at: new Date().toISOString(),
+        }
 
-      if (error) {
+        const { error: invitationUpdateError } =
+          await supabase
+            .from('company_invitations')
+            .update(invitationUpdates)
+            .eq('id', invitation.id)
+
+        if (invitationUpdateError) {
+          console.error(
+            'Unable to update the accepted invitation:',
+            invitationUpdateError,
+          )
+        }
+
+        const metadataFullName = String(
+          user.user_metadata?.full_name ||
+            user.user_metadata?.name ||
+            '',
+        ).trim()
+
+        const resolvedFullName =
+          String(profileData?.full_name || '').trim() ||
+          String(invitation.full_name || '').trim() ||
+          metadataFullName
+
+        const resolvedCompanyId =
+          profileData?.company_id ||
+          invitation.company_id ||
+          null
+
+        const resolvedRole = normaliseRole(
+          profileData?.role ||
+            invitation.role ||
+            'staff',
+        )
+
+        const resolvedEmail =
+          String(
+            profileData?.email ||
+              invitation.email ||
+              user.email ||
+              '',
+          )
+            .trim()
+            .toLowerCase()
+
+        if (!profileData) {
+          const { data: createdProfile, error: createError } =
+            await supabase
+              .from('profiles')
+              .upsert(
+                {
+                  id: user.id,
+                  company_id: resolvedCompanyId,
+                  email: resolvedEmail,
+                  full_name: resolvedFullName || null,
+                  role: resolvedRole,
+                },
+                {
+                  onConflict: 'id',
+                },
+              )
+              .select(PROFILE_FIELDS)
+              .single()
+
+          if (createError) {
+            throw createError
+          }
+
+          return createdProfile
+        }
+
+        const profileUpdates = {}
+
+        if (
+          !String(profileData.full_name || '').trim() &&
+          resolvedFullName
+        ) {
+          profileUpdates.full_name = resolvedFullName
+        }
+
+        if (!profileData.company_id && resolvedCompanyId) {
+          profileUpdates.company_id = resolvedCompanyId
+        }
+
+        if (!profileData.email && resolvedEmail) {
+          profileUpdates.email = resolvedEmail
+        }
+
+        if (!profileData.role && resolvedRole) {
+          profileUpdates.role = resolvedRole
+        }
+
+        if (Object.keys(profileUpdates).length === 0) {
+          return profileData
+        }
+
+        const { data: updatedProfile, error: updateError } =
+          await supabase
+            .from('profiles')
+            .update(profileUpdates)
+            .eq('id', user.id)
+            .select(PROFILE_FIELDS)
+            .single()
+
+        if (updateError) {
+          throw updateError
+        }
+
+        return updatedProfile
+      } catch (error) {
         /*
-         * Invitation acceptance must not block
-         * an otherwise valid user from signing in.
+         * Invitation/profile synchronisation should not prevent
+         * an otherwise valid existing user from signing in.
          */
         console.error(
-          'Unable to mark invitation as accepted:',
+          'Unable to synchronise invitation and profile:',
           error,
         )
+
+        return profileData
       }
     }, [])
 
@@ -149,8 +303,14 @@ export default function App() {
           platformAdminResponse.data?.user_id,
         )
 
-        const profileData =
+        let profileData =
           profileResponse.data || null
+
+        profileData =
+          await syncInvitationAndProfile(
+            user,
+            profileData,
+          )
 
         /*
          * A user must have either:
@@ -218,18 +378,6 @@ export default function App() {
           )
         }
 
-        /*
-         * Once authentication and access validation
-         * succeed, mark any matching pending
-         * invitation as accepted.
-         *
-         * This operation is intentionally
-         * non-blocking.
-         */
-        await markInvitationAsAccepted(
-          user.id,
-        )
-
         if (isMounted) {
           setProfile(normalisedProfile)
 
@@ -262,7 +410,7 @@ export default function App() {
         return null
       }
     },
-    [markInvitationAsAccepted],
+    [syncInvitationAndProfile],
   )
 
   useEffect(() => {

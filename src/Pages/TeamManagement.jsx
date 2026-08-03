@@ -298,6 +298,7 @@ export default function TeamManagement({ profile, session }) {
               `,
             )
             .eq('company_id', companyId)
+            .in('status', ['pending', 'accepted', 'expired'])
             .order('invited_at', {
               ascending: false,
             }),
@@ -368,13 +369,25 @@ export default function TeamManagement({ profile, session }) {
     }
   }, [companyId, loadTeamData])
 
+  const visibleInvitations = useMemo(
+    () =>
+      visibleInvitations.filter((invitation) => {
+        const status = String(
+          invitation.status || '',
+        ).toLowerCase()
+
+        return !['revoked', 'cancelled'].includes(status)
+      }),
+    [invitations],
+  )
+
   const pendingInvitations = useMemo(
     () =>
-      invitations.filter(
+      visibleInvitations.filter(
         (invitation) =>
           normaliseStatus(invitation.status) === 'pending',
       ),
-    [invitations],
+    [visibleInvitations],
   )
 
   const expiredInvitations = useMemo(
@@ -395,8 +408,25 @@ export default function TeamManagement({ profile, session }) {
 
         return false
       }),
-    [invitations],
+    [visibleInvitations],
   )
+
+  const invitationNamesByEmail = useMemo(() => {
+    const names = new Map()
+
+    visibleInvitations.forEach((invitation) => {
+      const email = String(invitation.email || '')
+        .trim()
+        .toLowerCase()
+      const fullName = String(invitation.full_name || '').trim()
+
+      if (email && fullName && !names.has(email)) {
+        names.set(email, fullName)
+      }
+    })
+
+    return names
+  }, [visibleInvitations])
 
   const activeMembers = members
 
@@ -405,10 +435,17 @@ export default function TeamManagement({ profile, session }) {
 
     return members.filter((member) => {
       const role = normaliseRole(member.role)
+      const memberEmail = String(member.email || '')
+        .trim()
+        .toLowerCase()
+      const effectiveFullName =
+        String(member.full_name || '').trim() ||
+        invitationNamesByEmail.get(memberEmail) ||
+        ''
 
       const matchesSearch =
         !search ||
-        String(member.full_name || '')
+        effectiveFullName
           .toLowerCase()
           .includes(search) ||
         String(member.email || '')
@@ -423,7 +460,12 @@ export default function TeamManagement({ profile, session }) {
 
       return matchesSearch && matchesRole
     })
-  }, [members, roleFilter, searchTerm])
+  }, [
+    invitationNamesByEmail,
+    members,
+    roleFilter,
+    searchTerm,
+  ])
 
   function handleInviteChange(event) {
     const { name, value } = event.target
@@ -697,14 +739,8 @@ export default function TeamManagement({ profile, session }) {
       })
 
       setInvitations((previous) =>
-        previous.map((item) =>
-          item.id === invitation.id
-            ? {
-                ...item,
-                status: 'cancelled',
-                updated_at: new Date().toISOString(),
-              }
-            : item,
+        previous.filter(
+          (item) => item.id !== invitation.id,
         ),
       )
 
@@ -1209,6 +1245,20 @@ export default function TeamManagement({ profile, session }) {
                       const role = normaliseRole(
                         member.role,
                       )
+                      const memberEmail = String(
+                        member.email || '',
+                      )
+                        .trim()
+                        .toLowerCase()
+                      const displayName =
+                        String(
+                          member.full_name || '',
+                        ).trim() ||
+                        invitationNamesByEmail.get(
+                          memberEmail,
+                        ) ||
+                        memberEmail.split('@')[0] ||
+                        'Trustera user'
                       const isCurrentUser =
                         member.id === currentUserId
                       const isUpdating =
@@ -1223,15 +1273,14 @@ export default function TeamManagement({ profile, session }) {
                             <div className="flex min-w-[230px] items-center gap-3">
                               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 font-bold">
                                 {getInitials(
-                                  member.full_name,
+                                  displayName,
                                   member.email,
                                 )}
                               </div>
 
                               <div>
                                 <div className="flex items-center gap-2 font-semibold text-white">
-                                  {member.full_name ||
-                                    'Unnamed user'}
+                                  {displayName}
 
                                   {isCurrentUser && (
                                     <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-200">
@@ -1334,14 +1383,14 @@ export default function TeamManagement({ profile, session }) {
               <div className="rounded-2xl border border-slate-800 bg-slate-950 px-6 py-12 text-center text-slate-400">
                 Loading invitations...
               </div>
-            ) : invitations.length === 0 ? (
+            ) : visibleInvitations.length === 0 ? (
               <EmptyState
                 title="No invitations yet"
                 description="Invitations sent to company administrators, managers and staff will appear here."
               />
             ) : (
               <div className="grid gap-4 lg:grid-cols-2">
-                {invitations.map((invitation) => {
+                {visibleInvitations.map((invitation) => {
                   let status = normaliseStatus(
                     invitation.status,
                   )
@@ -1443,13 +1492,15 @@ export default function TeamManagement({ profile, session }) {
 
                         <div>
                           <dt className="text-slate-500">
-                            Auth account
+                            Account setup
                           </dt>
 
                           <dd className="mt-1 text-slate-200">
                             {invitation.auth_user_id
-                              ? 'Created'
-                              : 'Pending'}
+                              ? status === 'accepted'
+                                ? 'Complete'
+                                : 'Auth account created'
+                              : 'Awaiting acceptance'}
                           </dd>
                         </div>
                       </dl>
