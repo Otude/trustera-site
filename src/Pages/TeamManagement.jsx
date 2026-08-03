@@ -298,6 +298,7 @@ export default function TeamManagement({ profile, session }) {
               `,
             )
             .eq('company_id', companyId)
+            .in('status', ['pending', 'accepted', 'expired'])
             .order('invited_at', {
               ascending: false,
             }),
@@ -368,13 +369,25 @@ export default function TeamManagement({ profile, session }) {
     }
   }, [companyId, loadTeamData])
 
+  const visibleInvitations = useMemo(
+    () =>
+      visibleInvitations.filter((invitation) => {
+        const status = String(
+          invitation.status || '',
+        ).toLowerCase()
+
+        return !['revoked', 'cancelled'].includes(status)
+      }),
+    [invitations],
+  )
+
   const pendingInvitations = useMemo(
     () =>
-      invitations.filter(
+      visibleInvitations.filter(
         (invitation) =>
           normaliseStatus(invitation.status) === 'pending',
       ),
-    [invitations],
+    [visibleInvitations],
   )
 
   const expiredInvitations = useMemo(
@@ -395,13 +408,13 @@ export default function TeamManagement({ profile, session }) {
 
         return false
       }),
-    [invitations],
+    [visibleInvitations],
   )
 
   const invitationNamesByEmail = useMemo(() => {
     const names = new Map()
 
-    invitations.forEach((invitation) => {
+    visibleInvitations.forEach((invitation) => {
       const email = String(invitation.email || '')
         .trim()
         .toLowerCase()
@@ -413,7 +426,7 @@ export default function TeamManagement({ profile, session }) {
     })
 
     return names
-  }, [invitations])
+  }, [visibleInvitations])
 
   const activeMembers = members
 
@@ -726,14 +739,8 @@ export default function TeamManagement({ profile, session }) {
       })
 
       setInvitations((previous) =>
-        previous.map((item) =>
-          item.id === invitation.id
-            ? {
-                ...item,
-                status: 'cancelled',
-                updated_at: new Date().toISOString(),
-              }
-            : item,
+        previous.filter(
+          (item) => item.id !== invitation.id,
         ),
       )
 
@@ -1376,14 +1383,14 @@ export default function TeamManagement({ profile, session }) {
               <div className="rounded-2xl border border-slate-800 bg-slate-950 px-6 py-12 text-center text-slate-400">
                 Loading invitations...
               </div>
-            ) : invitations.length === 0 ? (
+            ) : visibleInvitations.length === 0 ? (
               <EmptyState
                 title="No invitations yet"
                 description="Invitations sent to company administrators, managers and staff will appear here."
               />
             ) : (
               <div className="grid gap-4 lg:grid-cols-2">
-                {invitations.map((invitation) => {
+                {visibleInvitations.map((invitation) => {
                   let status = normaliseStatus(
                     invitation.status,
                   )
