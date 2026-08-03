@@ -398,6 +398,23 @@ export default function TeamManagement({ profile, session }) {
     [invitations],
   )
 
+  const invitationNamesByEmail = useMemo(() => {
+    const names = new Map()
+
+    invitations.forEach((invitation) => {
+      const email = String(invitation.email || '')
+        .trim()
+        .toLowerCase()
+      const fullName = String(invitation.full_name || '').trim()
+
+      if (email && fullName && !names.has(email)) {
+        names.set(email, fullName)
+      }
+    })
+
+    return names
+  }, [invitations])
+
   const activeMembers = members
 
   const filteredMembers = useMemo(() => {
@@ -405,10 +422,17 @@ export default function TeamManagement({ profile, session }) {
 
     return members.filter((member) => {
       const role = normaliseRole(member.role)
+      const memberEmail = String(member.email || '')
+        .trim()
+        .toLowerCase()
+      const effectiveFullName =
+        String(member.full_name || '').trim() ||
+        invitationNamesByEmail.get(memberEmail) ||
+        ''
 
       const matchesSearch =
         !search ||
-        String(member.full_name || '')
+        effectiveFullName
           .toLowerCase()
           .includes(search) ||
         String(member.email || '')
@@ -423,7 +447,12 @@ export default function TeamManagement({ profile, session }) {
 
       return matchesSearch && matchesRole
     })
-  }, [members, roleFilter, searchTerm])
+  }, [
+    invitationNamesByEmail,
+    members,
+    roleFilter,
+    searchTerm,
+  ])
 
   function handleInviteChange(event) {
     const { name, value } = event.target
@@ -1209,6 +1238,20 @@ export default function TeamManagement({ profile, session }) {
                       const role = normaliseRole(
                         member.role,
                       )
+                      const memberEmail = String(
+                        member.email || '',
+                      )
+                        .trim()
+                        .toLowerCase()
+                      const displayName =
+                        String(
+                          member.full_name || '',
+                        ).trim() ||
+                        invitationNamesByEmail.get(
+                          memberEmail,
+                        ) ||
+                        memberEmail.split('@')[0] ||
+                        'Trustera user'
                       const isCurrentUser =
                         member.id === currentUserId
                       const isUpdating =
@@ -1223,15 +1266,14 @@ export default function TeamManagement({ profile, session }) {
                             <div className="flex min-w-[230px] items-center gap-3">
                               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 font-bold">
                                 {getInitials(
-                                  member.full_name,
+                                  displayName,
                                   member.email,
                                 )}
                               </div>
 
                               <div>
                                 <div className="flex items-center gap-2 font-semibold text-white">
-                                  {member.full_name ||
-                                    'Unnamed user'}
+                                  {displayName}
 
                                   {isCurrentUser && (
                                     <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-200">
@@ -1443,13 +1485,15 @@ export default function TeamManagement({ profile, session }) {
 
                         <div>
                           <dt className="text-slate-500">
-                            Auth account
+                            Account setup
                           </dt>
 
                           <dd className="mt-1 text-slate-200">
                             {invitation.auth_user_id
-                              ? 'Created'
-                              : 'Pending'}
+                              ? status === 'accepted'
+                                ? 'Complete'
+                                : 'Auth account created'
+                              : 'Awaiting acceptance'}
                           </dd>
                         </div>
                       </dl>
