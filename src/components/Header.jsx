@@ -96,7 +96,6 @@ export default function Header({ profile, session }) {
         status,
         severity,
         sent_at,
-        created_at,
         is_read,
         read_at
       `)
@@ -633,8 +632,7 @@ export default function Header({ profile, session }) {
                         <p style={styles.alertMeta}>
                           <strong>Logged:</strong>{' '}
                           {formatDate(
-                            item.sent_at ||
-                              item.created_at,
+                            item.sent_at,
                           )}
                         </p>
 
@@ -673,7 +671,10 @@ export default function Header({ profile, session }) {
             )}
           </div>
 
-          <div style={styles.userBox}>
+          <div
+            className="trustera-header-user-box"
+            style={styles.userBox}
+          >
             <div
               style={styles.avatar}
               aria-hidden="true"
