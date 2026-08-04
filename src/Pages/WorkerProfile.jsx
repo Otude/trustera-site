@@ -15,6 +15,7 @@ import {
 } from 'recharts'
 
 import { supabase } from '../supabase'
+import { can } from '../utils/permissions'
 
 const DOCUMENTS_BUCKET = 'documents'
 const EXPIRY_WARNING_DAYS = 30
@@ -39,7 +40,10 @@ export default function WorkerProfile({ profile }) {
   const [deletingId, setDeletingId] = useState(null)
 
   const companyId = profile?.company_id || null
-  const isAdmin = profile?.role === 'admin'
+  const canManageDocuments = can(
+    profile,
+    'manageDocuments',
+  )
 
   const calculateStatus = useCallback((date) => {
     if (!date) return 'valid'
@@ -242,6 +246,13 @@ export default function WorkerProfile({ profile }) {
   async function uploadDocument(event) {
     event.preventDefault()
 
+    if (!canManageDocuments) {
+      toast.error(
+        'Your role does not allow document uploads.',
+      )
+      return
+    }
+
     if (uploading) return
 
     let uploadedFilePath = null
@@ -440,8 +451,10 @@ export default function WorkerProfile({ profile }) {
   }
 
   async function deleteDocument(document) {
-    if (!isAdmin) {
-      toast.error('Only admins can delete documents.')
+    if (!canManageDocuments) {
+      toast.error(
+        'Your role does not allow document deletion.',
+      )
       return
     }
 
@@ -550,7 +563,7 @@ export default function WorkerProfile({ profile }) {
   }
 
   function getStatusStyle(status) {
-    if (status === 'expired') {
+    if (String(status || '').toLowerCase() === 'expired') {
       return {
         background: '#7f1d1d',
         color: '#fecaca',
@@ -732,6 +745,14 @@ export default function WorkerProfile({ profile }) {
         </button>
       </div>
 
+      {!canManageDocuments && (
+        <div style={styles.permissionNotice}>
+          You can review this worker’s profile and open available
+          documents, but your role cannot upload or delete document
+          records.
+        </div>
+      )}
+
       <div style={styles.profileCard}>
         <p>
           <strong>Role:</strong> {worker.role || '-'}
@@ -878,58 +899,65 @@ export default function WorkerProfile({ profile }) {
         <div style={styles.infoCard}>
           <h2>Quick Upload</h2>
 
-          <form
-            onSubmit={uploadDocument}
-            style={styles.uploadForm}
-          >
-            <input
-              type="text"
-              placeholder="Document Type"
-              value={documentType}
-              onChange={(event) =>
-                setDocumentType(event.target.value)
-              }
-              disabled={uploading}
-              required
-              style={styles.input}
-            />
-
-            <input
-              type="date"
-              value={expiryDate}
-              onChange={(event) =>
-                setExpiryDate(event.target.value)
-              }
-              disabled={uploading}
-              required
-              style={styles.input}
-            />
-
-            <input
-              type="file"
-              onChange={(event) =>
-                setFile(event.target.files?.[0] || null)
-              }
-              disabled={uploading}
-              required
-              style={styles.input}
-            />
-
-            <button
-              type="submit"
-              style={{
-                ...styles.uploadButton,
-                ...(uploading
-                  ? styles.disabledButton
-                  : {}),
-              }}
-              disabled={uploading}
+          {canManageDocuments ? (
+            <form
+              onSubmit={uploadDocument}
+              style={styles.uploadForm}
             >
-              {uploading
-                ? 'Uploading...'
-                : 'Upload Document'}
-            </button>
-          </form>
+              <input
+                type="text"
+                placeholder="Document Type"
+                value={documentType}
+                onChange={(event) =>
+                  setDocumentType(event.target.value)
+                }
+                disabled={uploading}
+                required
+                style={styles.input}
+              />
+
+              <input
+                type="date"
+                value={expiryDate}
+                onChange={(event) =>
+                  setExpiryDate(event.target.value)
+                }
+                disabled={uploading}
+                required
+                style={styles.input}
+              />
+
+              <input
+                type="file"
+                onChange={(event) =>
+                  setFile(event.target.files?.[0] || null)
+                }
+                disabled={uploading}
+                required
+                style={styles.input}
+              />
+
+              <button
+                type="submit"
+                style={{
+                  ...styles.uploadButton,
+                  ...(uploading
+                    ? styles.disabledButton
+                    : {}),
+                }}
+                disabled={uploading}
+              >
+                {uploading
+                  ? 'Uploading...'
+                  : 'Upload Document'}
+              </button>
+            </form>
+          ) : (
+            <p style={styles.emptyText}>
+              Your role has read-only access to this worker’s
+              compliance documents.
+            </p>
+          )}
         </div>
       </div>
 
@@ -985,7 +1013,7 @@ export default function WorkerProfile({ profile }) {
                   <th style={styles.th}>Uploaded At</th>
                   <th style={styles.th}>File</th>
 
-                  {isAdmin && (
+                  {canManageDocuments && (
                     <th style={styles.th}>Action</th>
                   )}
                 </tr>
@@ -1047,7 +1075,7 @@ export default function WorkerProfile({ profile }) {
                         </button>
                       </td>
 
-                      {isAdmin && (
+                      {canManageDocuments && (
                         <td style={styles.td}>
                           <button
                             type="button"
@@ -1220,6 +1248,17 @@ const styles = {
     color: '#ffffff',
     fontWeight: 'bold',
     cursor: 'pointer',
+  },
+
+  permissionNotice: {
+    maxWidth: '760px',
+    marginBottom: '24px',
+    padding: '14px 16px',
+    border: '1px solid #92400e',
+    borderRadius: '10px',
+    background: '#78350f',
+    color: '#fde68a',
+    lineHeight: 1.5,
   },
 
   profileCard: {

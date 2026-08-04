@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
 import toast from 'react-hot-toast'
 
 import { supabase } from '../supabase'
+import { can } from '../utils/permissions'
 
 const ACTION_META = {
   all: {
@@ -10,30 +16,35 @@ const ACTION_META = {
     icon: '☷',
     accent: '#2563eb',
   },
+
   create: {
     label: 'Create Actions',
     description: 'New records and uploads',
     icon: '+',
     accent: '#16a34a',
   },
+
   update: {
     label: 'Update Actions',
     description: 'Changes and modifications',
     icon: '✎',
     accent: '#d97706',
   },
+
   delete: {
     label: 'Delete Actions',
     description: 'Removed records',
     icon: '⌫',
     accent: '#dc2626',
   },
+
   access: {
     label: 'Access Actions',
     description: 'Login and access events',
     icon: '♙',
     accent: '#7c3aed',
   },
+
   other: {
     label: 'Other Actions',
     description: 'Uncategorised activity',
@@ -42,21 +53,613 @@ const ACTION_META = {
   },
 }
 
-export default function AuditLogs({ profile }) {
+const AUDIT_VISIBLE_ROLES = new Set([
+  'admin',
+  'compliance_officer',
+])
+
+const SENSITIVE_DETAIL_KEYS = new Set([
+  'id',
+  'user_id',
+  'company_id',
+  'entity_id',
+  'invitation_id',
+  'document_id',
+  'worker_id',
+  'auth_user_id',
+  'invited_by',
+  'access_token',
+  'refresh_token',
+  'token',
+  'password',
+  'service_role_key',
+])
+
+function normaliseRole(role) {
+  return String(role || '')
+    .trim()
+    .toLowerCase()
+}
+
+function normaliseAction(action) {
+  return String(action || '')
+    .trim()
+    .toLowerCase()
+    .replaceAll('_', ' ')
+    .replaceAll('-', ' ')
+    .replace(/\s+/g, ' ')
+}
+
+function titleCase(value) {
+  const normalised = String(value || '')
+    .trim()
+    .replaceAll('_', ' ')
+    .replaceAll('-', ' ')
+    .replace(/\s+/g, ' ')
+
+  if (!normalised) {
+    return ''
+  }
+
+  return normalised
+    .split(' ')
+    .filter(Boolean)
+    .map(
+      (word) =>
+        word.charAt(0).toUpperCase() +
+        word.slice(1).toLowerCase(),
+    )
+    .join(' ')
+}
+
+function formatAction(action) {
+  return titleCase(action) || 'Unknown Action'
+}
+
+function formatEntityType(entityType) {
+  return titleCase(entityType) || 'Other'
+}
+
+function formatDate(dateValue) {
+  if (!dateValue) {
+    return '-'
+  }
+
+  const date = new Date(dateValue)
+
+  if (Number.isNaN(date.getTime())) {
+    return '-'
+  }
+
+  return date.toLocaleString('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  })
+}
+
+function parseDetails(details) {
+  if (!details) {
+    return {}
+  }
+
+  if (
+    typeof details === 'object' &&
+    details !== null &&
+    !Array.isArray(details)
+  ) {
+    return details
+  }
+
+  try {
+    const parsed = JSON.parse(String(details))
+
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+    ) {
+      return parsed
+    }
+
+    return {
+      message: String(details),
+    }
+  } catch {
+    return {
+      message: String(details),
+    }
+  }
+}
+
+function humaniseKey(key) {
+  return titleCase(key) || 'Detail'
+}
+
+function isSensitiveDetailKey(key) {
+  const value = String(key || '')
+    .trim()
+    .toLowerCase()
+
+  if (SENSITIVE_DETAIL_KEYS.has(value)) {
+    return true
+  }
+
+  return (
+    value.endsWith('_id') ||
+    value.includes('uuid') ||
+    value.includes('token') ||
+    value.includes('secret') ||
+    value.includes('password') ||
+    value.includes('service_role') ||
+    value.includes('file_path') ||
+    value.includes('storage_path')
+  )
+}
+
+function formatDetailValue(value) {
+  if (typeof value === 'boolean') {
+    return value ? 'Yes' : 'No'
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) =>
+        typeof item === 'object'
+          ? JSON.stringify(item)
+          : String(item),
+      )
+      .join(', ')
+  }
+
+  if (
+    typeof value === 'object' &&
+    value !== null
+  ) {
+    return JSON.stringify(value)
+  }
+
+  return String(value)
+}
+
+function getSafeDetailEntries(details) {
+  return Object.entries(parseDetails(details))
+    .filter(([key, value]) => {
+      if (isSensitiveDetailKey(key)) {
+        return false
+      }
+
+      if (
+        value === null ||
+        value === undefined ||
+        value === ''
+      ) {
+        return false
+      }
+
+      return true
+    })
+    .slice(0, 10)
+}
+
+function getActionCategory(action) {
+  const normalised = normaliseAction(action)
+
+  if (
+    normalised.includes('delete') ||
+    normalised.includes('remove') ||
+    normalised.includes('revoke') ||
+    normalised.includes('cancel')
+  ) {
+    return 'delete'
+  }
+
+  if (
+    normalised.includes('update') ||
+    normalised.includes('edit') ||
+    normalised.includes('change') ||
+    normalised.includes('mark') ||
+    normalised.includes('accept') ||
+    normalised.includes('approve') ||
+    normalised.includes('assign') ||
+    normalised.includes('suspend') ||
+    normalised.includes('restore')
+  ) {
+    return 'update'
+  }
+
+  if (
+    normalised.includes('create') ||
+    normalised.includes('upload') ||
+    normalised.includes('add') ||
+    normalised.includes('insert') ||
+    normalised.includes('invite') ||
+    normalised.includes('request') ||
+    normalised.includes('send')
+  ) {
+    return 'create'
+  }
+
+  if (
+    normalised.includes('login') ||
+    normalised.includes('log in') ||
+    normalised.includes('sign in') ||
+    normalised.includes('sign out') ||
+    normalised.includes('view') ||
+    normalised.includes('download') ||
+    normalised.includes('export') ||
+    normalised.includes('access')
+  ) {
+    return 'access'
+  }
+
+  return 'other'
+}
+
+function getEntityName(log) {
+  const details = parseDetails(log.details)
+
+  const possibleNames = [
+    log.entity_name,
+    details.entity_name,
+    details.full_name,
+    details.worker_name,
+    details.document_name,
+    details.document_type,
+    details.company_name,
+    details.email,
+    details.user_email,
+    details.name,
+    details.title,
+  ]
+
+  const matchedName = possibleNames.find(
+    (value) =>
+      value !== null &&
+      value !== undefined &&
+      String(value).trim(),
+  )
+
+  if (matchedName) {
+    return String(matchedName).trim()
+  }
+
+  return formatEntityType(log.entity_type)
+}
+
+function getUserEmail(log) {
+  const details = parseDetails(log.details)
+
+  return (
+    log.user_email ||
+    log.resolved_user_email ||
+    details.user_email ||
+    details.invited_by_email ||
+    details.email ||
+    ''
+  )
+}
+
+function getFriendlyDetail(log) {
+  const details = parseDetails(log.details)
+  const action = normaliseAction(log.action)
+  const category = getActionCategory(log.action)
+  const entityName = getEntityName(log)
+
+  if (
+    action.includes('team member invited') ||
+    action.includes('user invited') ||
+    action.includes('invitation sent')
+  ) {
+    const invitedEmail =
+      details.email ||
+      details.invited_email ||
+      entityName
+
+    return `Invitation sent to ${invitedEmail}`
+  }
+
+  if (
+    action.includes('invitation accepted') ||
+    action.includes('invite accepted')
+  ) {
+    return `${entityName || 'Invitation'} accepted`
+  }
+
+  if (
+    action.includes('invitation revoked') ||
+    action.includes('invite revoked')
+  ) {
+    return `${entityName || 'Invitation'} revoked`
+  }
+
+  if (
+    action.includes('worker created') ||
+    action.includes('worker added')
+  ) {
+    return `${entityName || 'Worker'} created`
+  }
+
+  if (
+    action.includes('worker updated') ||
+    action.includes('worker edited')
+  ) {
+    return `${entityName || 'Worker'} updated`
+  }
+
+  if (
+    action.includes('worker deleted') ||
+    action.includes('worker removed')
+  ) {
+    return `${entityName || 'Worker'} deleted`
+  }
+
+  if (
+    action.includes('document uploaded') ||
+    action.includes('upload document')
+  ) {
+    return `${entityName || 'Document'} uploaded successfully`
+  }
+
+  if (action.includes('document updated')) {
+    return `${entityName || 'Document'} updated`
+  }
+
+  if (action.includes('document deleted')) {
+    return `${entityName || 'Document'} deleted`
+  }
+
+  if (action.includes('role changed')) {
+    const previousRole =
+      details.previous_role ||
+      details.old_role
+
+    const nextRole =
+      details.new_role ||
+      details.role
+
+    if (previousRole && nextRole) {
+      return `${entityName || 'User'} changed from ${titleCase(
+        previousRole,
+      )} to ${titleCase(nextRole)}`
+    }
+
+    if (nextRole) {
+      return `${entityName || 'User'} assigned the ${titleCase(
+        nextRole,
+      )} role`
+    }
+
+    return `${entityName || 'User'} role changed`
+  }
+
+  if (
+    action.includes('login') ||
+    action.includes('sign in')
+  ) {
+    return 'User signed in'
+  }
+
+  if (action.includes('sign out')) {
+    return 'User signed out'
+  }
+
+  if (
+    action.includes('export') ||
+    action.includes('download')
+  ) {
+    return `${entityName || 'Report'} downloaded`
+  }
+
+  if (details.message) {
+    return String(details.message)
+  }
+
+  if (category === 'create') {
+    return `${entityName || 'Record'} created`
+  }
+
+  if (category === 'update') {
+    return `${entityName || 'Record'} updated`
+  }
+
+  if (category === 'delete') {
+    return `${entityName || 'Record'} deleted`
+  }
+
+  if (category === 'access') {
+    return `${entityName || 'Record'} accessed`
+  }
+
+  return 'System activity recorded'
+}
+
+function getActionAppearance(action) {
+  const category = getActionCategory(action)
+  const meta =
+    ACTION_META[category] || ACTION_META.other
+
+  const appearances = {
+    create: {
+      background: '#052e16',
+      color: '#bbf7d0',
+      border: '#15803d',
+    },
+
+    update: {
+      background: '#451a03',
+      color: '#fde68a',
+      border: '#b45309',
+    },
+
+    delete: {
+      background: '#450a0a',
+      color: '#fecaca',
+      border: '#b91c1c',
+    },
+
+    access: {
+      background: '#2e1065',
+      color: '#ddd6fe',
+      border: '#7c3aed',
+    },
+
+    other: {
+      background: '#1e293b',
+      color: '#cbd5e1',
+      border: '#475569',
+    },
+  }
+
+  return {
+    ...appearances[category],
+    icon: meta.icon,
+    accent: meta.accent,
+    category,
+  }
+}
+
+function normaliseLog(log, profileEmailMap = {}) {
+  const details = parseDetails(log.details)
+
+  const createdAt =
+    log.created_at ||
+    log.logged_at ||
+    log.inserted_at ||
+    log.timestamp ||
+    null
+
+  const userId =
+    log.user_id ||
+    log.created_by ||
+    log.actor_id ||
+    null
+
+  const resolvedUserEmail =
+    log.user_email ||
+    profileEmailMap[userId] ||
+    details.user_email ||
+    details.invited_by_email ||
+    details.email ||
+    null
+
+  return {
+    ...log,
+    id:
+      log.id ||
+      `${createdAt || 'log'}-${Math.random()}`,
+    company_id:
+      log.company_id ||
+      details.company_id ||
+      null,
+    user_id: userId,
+    user_email: resolvedUserEmail,
+    resolved_user_email: resolvedUserEmail,
+    action:
+      log.action ||
+      log.event_type ||
+      log.event ||
+      'system_activity',
+    entity_type:
+      log.entity_type ||
+      log.resource_type ||
+      log.table_name ||
+      'record',
+    entity_id:
+      log.entity_id ||
+      log.resource_id ||
+      null,
+    entity_name:
+      log.entity_name ||
+      details.entity_name ||
+      details.full_name ||
+      details.worker_name ||
+      details.document_type ||
+      details.company_name ||
+      details.email ||
+      null,
+    details,
+    created_at: createdAt,
+  }
+}
+
+export default function AuditLogs({
+  profile,
+  session,
+}) {
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+  const [refreshing, setRefreshing] =
+    useState(false)
+  const [loadError, setLoadError] = useState('')
 
   const [search, setSearch] = useState('')
-  const [actionFilter, setActionFilter] = useState('all')
-  const [expandedLogId, setExpandedLogId] = useState(null)
+  const [actionFilter, setActionFilter] =
+    useState('all')
+  const [expandedLogId, setExpandedLogId] =
+    useState(null)
 
-  const companyId = profile?.company_id || null
+  const companyId =
+    profile?.company_id || null
+
+  const profileRole = normaliseRole(profile?.role)
+
+  const hasAuditPermission =
+    can(profile, 'viewAuditLogs') ||
+    AUDIT_VISIBLE_ROLES.has(profileRole)
+
+  const currentUserEmail =
+    session?.user?.email ||
+    profile?.email ||
+    ''
+
+  const fetchProfileEmailMap = useCallback(
+    async (userIds) => {
+      const uniqueUserIds = [
+        ...new Set(
+          userIds.filter(Boolean),
+        ),
+      ]
+
+      if (uniqueUserIds.length === 0) {
+        return {}
+      }
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, email, full_name')
+        .in('id', uniqueUserIds)
+
+      if (error) {
+        console.warn(
+          'Unable to resolve audit-log users:',
+          error,
+        )
+
+        return {}
+      }
+
+      return (data || []).reduce(
+        (result, item) => {
+          if (item?.id) {
+            result[item.id] =
+              item.email ||
+              item.full_name ||
+              'Unknown user'
+          }
+
+          return result
+        },
+        {},
+      )
+    },
+    [],
+  )
 
   const fetchLogs = useCallback(
     async ({ showLoading = true } = {}) => {
-      if (!companyId) {
+      if (!companyId || !hasAuditPermission) {
         setLogs([])
+        setLoadError('')
         setLoading(false)
         setRefreshing(false)
         return
@@ -68,42 +671,121 @@ export default function AuditLogs({ profile }) {
         setRefreshing(true)
       }
 
+      setLoadError('')
+
       try {
+        /*
+         * Select all available columns so the page does not fail
+         * when optional columns such as user_email or entity_name
+         * are not present in the database.
+         */
         const { data, error } = await supabase
           .from('audit_logs')
-          .select(`
-            id,
-            company_id,
-            user_id,
-            user_email,
-            action,
-            entity_type,
-            entity_id,
-            entity_name,
-            details,
-            created_at
-          `)
+          .select('*')
           .eq('company_id', companyId)
-          .order('created_at', { ascending: false })
+          .order('created_at', {
+            ascending: false,
+          })
 
         if (error) {
-          throw error
+          /*
+           * Some older schemas may use logged_at instead of
+           * created_at. Retry using logged_at when necessary.
+           */
+          const missingCreatedAt =
+            String(error.message || '')
+              .toLowerCase()
+              .includes('created_at')
+
+          if (!missingCreatedAt) {
+            throw error
+          }
+
+          const {
+            data: fallbackData,
+            error: fallbackError,
+          } = await supabase
+            .from('audit_logs')
+            .select('*')
+            .eq('company_id', companyId)
+            .order('logged_at', {
+              ascending: false,
+            })
+
+          if (fallbackError) {
+            throw fallbackError
+          }
+
+          const userIds = (
+            fallbackData || []
+          )
+            .map(
+              (log) =>
+                log.user_id ||
+                log.created_by ||
+                log.actor_id,
+            )
+            .filter(Boolean)
+
+          const emailMap =
+            await fetchProfileEmailMap(userIds)
+
+          setLogs(
+            (fallbackData || []).map((log) =>
+              normaliseLog(log, emailMap),
+            ),
+          )
+
+          return
         }
 
-        setLogs(data || [])
+        const userIds = (data || [])
+          .map(
+            (log) =>
+              log.user_id ||
+              log.created_by ||
+              log.actor_id,
+          )
+          .filter(Boolean)
+
+        const emailMap =
+          await fetchProfileEmailMap(userIds)
+
+        setLogs(
+          (data || []).map((log) =>
+            normaliseLog(log, emailMap),
+          ),
+        )
       } catch (error) {
-        console.error('Unable to load audit logs:', error)
-        toast.error(error?.message || 'Unable to load audit logs.')
+        console.error(
+          'Unable to load audit logs:',
+          error,
+        )
+
+        const message =
+          error?.message ||
+          'Unable to load audit logs.'
+
+        setLoadError(message)
+        setLogs([])
+        toast.error(message)
       } finally {
         setLoading(false)
         setRefreshing(false)
       }
     },
-    [companyId],
+    [
+      companyId,
+      fetchProfileEmailMap,
+      hasAuditPermission,
+    ],
   )
 
   useEffect(() => {
-    if (!companyId) {
+    if (
+      !companyId ||
+      !hasAuditPermission
+    ) {
       setLogs([])
       setLoading(false)
       return undefined
@@ -121,287 +803,113 @@ export default function AuditLogs({ profile }) {
           table: 'audit_logs',
           filter: `company_id=eq.${companyId}`,
         },
-        (payload) => {
-          if (payload.new?.company_id !== companyId) {
+        async (payload) => {
+          const insertedLog = payload.new
+
+          if (
+            insertedLog?.company_id !== companyId
+          ) {
             return
           }
 
-          setLogs((current) => {
-            const alreadyExists = current.some(
-              (item) => item.id === payload.new.id,
+          const userId =
+            insertedLog.user_id ||
+            insertedLog.created_by ||
+            insertedLog.actor_id ||
+            null
+
+          let emailMap = {}
+
+          if (userId) {
+            emailMap =
+              await fetchProfileEmailMap([
+                userId,
+              ])
+          }
+
+          const normalisedLog =
+            normaliseLog(
+              insertedLog,
+              emailMap,
             )
+
+          setLogs((current) => {
+            const alreadyExists =
+              current.some(
+                (item) =>
+                  item.id ===
+                  normalisedLog.id,
+              )
 
             if (alreadyExists) {
               return current
             }
 
-            return [payload.new, ...current]
+            return [
+              normalisedLog,
+              ...current,
+            ]
           })
-
-          toast.success('A new audit event was recorded.')
         },
       )
       .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR') {
-          console.error('Audit log Realtime channel failed.')
+        if (
+          status === 'CHANNEL_ERROR' ||
+          status === 'TIMED_OUT'
+        ) {
+          console.error(
+            'Audit log Realtime channel failed:',
+            status,
+          )
         }
       })
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [companyId, fetchLogs])
-
-  function normaliseAction(action) {
-    return String(action || '')
-      .trim()
-      .toLowerCase()
-      .replaceAll('_', ' ')
-      .replaceAll('-', ' ')
-  }
-
-  function formatAction(action) {
-    const normalised = normaliseAction(action)
-
-    if (!normalised) return 'Unknown Action'
-
-    return normalised
-      .split(' ')
-      .filter(Boolean)
-      .map(
-        (word) =>
-          word.charAt(0).toUpperCase() + word.slice(1),
-      )
-      .join(' ')
-  }
-
-  function formatEntityType(entityType) {
-    const value = String(entityType || '')
-      .trim()
-      .toLowerCase()
-      .replaceAll('_', ' ')
-      .replaceAll('-', ' ')
-
-    if (!value) return '-'
-
-    return value
-      .split(' ')
-      .filter(Boolean)
-      .map(
-        (word) =>
-          word.charAt(0).toUpperCase() + word.slice(1),
-      )
-      .join(' ')
-  }
-
-  function formatDate(dateValue) {
-    if (!dateValue) return '-'
-
-    const date = new Date(dateValue)
-
-    if (Number.isNaN(date.getTime())) {
-      return '-'
-    }
-
-    return date.toLocaleString('en-GB')
-  }
-
-  function getActionCategory(action) {
-    const normalised = normaliseAction(action)
-
-    if (
-      normalised.includes('delete') ||
-      normalised.includes('remove')
-    ) {
-      return 'delete'
-    }
-
-    if (
-      normalised.includes('update') ||
-      normalised.includes('edit') ||
-      normalised.includes('change') ||
-      normalised.includes('mark')
-    ) {
-      return 'update'
-    }
-
-    if (
-      normalised.includes('create') ||
-      normalised.includes('upload') ||
-      normalised.includes('add') ||
-      normalised.includes('insert') ||
-      normalised.includes('request')
-    ) {
-      return 'create'
-    }
-
-    if (
-      normalised.includes('login') ||
-      normalised.includes('sign in') ||
-      normalised.includes('view') ||
-      normalised.includes('download') ||
-      normalised.includes('access')
-    ) {
-      return 'access'
-    }
-
-    return 'other'
-  }
-
-  function parseDetails(details) {
-    if (!details) return {}
-
-    if (typeof details === 'object' && !Array.isArray(details)) {
-      return details
-    }
-
-    try {
-      const parsed = JSON.parse(String(details))
-
-      if (typeof parsed === 'object' && parsed !== null) {
-        return parsed
-      }
-    } catch {
-      return {
-        message: String(details),
-      }
-    }
-
-    return {}
-  }
-
-  function humaniseKey(key) {
-    return String(key || '')
-      .replaceAll('_', ' ')
-      .replaceAll('-', ' ')
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-  }
-
-  function isSensitiveDetailKey(key) {
-    const value = String(key || '').toLowerCase()
-
-    return (
-      value === 'id' ||
-      value.endsWith('_id') ||
-      value.includes('uuid') ||
-      value.includes('path') ||
-      value.includes('token') ||
-      value.includes('identifier')
-    )
-  }
-
-  function getSafeDetailEntries(details) {
-    return Object.entries(parseDetails(details))
-      .filter(([key, value]) => {
-        if (isSensitiveDetailKey(key)) return false
-        if (value === null || value === undefined || value === '') {
-          return false
-        }
-
-        return typeof value !== 'object'
-      })
-      .slice(0, 8)
-  }
-
-  function getFriendlyDetail(log) {
-    const details = parseDetails(log.details)
-    const category = getActionCategory(log.action)
-    const entityName =
-      log.entity_name ||
-      details.worker_name ||
-      details.document_type ||
-      formatEntityType(log.entity_type)
-
-    if (category === 'create') {
-      if (normaliseAction(log.action).includes('upload')) {
-        return `${entityName || 'Document'} uploaded successfully`
-      }
-
-      return `${entityName || 'Record'} created`
-    }
-
-    if (category === 'update') {
-      return `${entityName || 'Record'} updated`
-    }
-
-    if (category === 'delete') {
-      return `${entityName || 'Record'} deleted`
-    }
-
-    if (category === 'access') {
-      if (normaliseAction(log.action).includes('login')) {
-        return 'User signed in'
-      }
-
-      return `${entityName || 'Record'} accessed`
-    }
-
-    if (details.message) {
-      return String(details.message)
-    }
-
-    return 'System activity recorded'
-  }
-
-  function getActionAppearance(action) {
-    const category = getActionCategory(action)
-    const meta = ACTION_META[category]
-
-    const appearances = {
-      create: {
-        background: '#052e16',
-        color: '#bbf7d0',
-        border: '#15803d',
-      },
-      update: {
-        background: '#451a03',
-        color: '#fde68a',
-        border: '#b45309',
-      },
-      delete: {
-        background: '#450a0a',
-        color: '#fecaca',
-        border: '#b91c1c',
-      },
-      access: {
-        background: '#2e1065',
-        color: '#ddd6fe',
-        border: '#7c3aed',
-      },
-      other: {
-        background: '#1e293b',
-        color: '#cbd5e1',
-        border: '#475569',
-      },
-    }
-
-    return {
-      ...appearances[category],
-      icon: meta.icon,
-      category,
-    }
-  }
+  }, [
+    companyId,
+    fetchLogs,
+    fetchProfileEmailMap,
+    hasAuditPermission,
+  ])
 
   const filteredLogs = useMemo(() => {
-    const term = search.trim().toLowerCase()
+    const term = search
+      .trim()
+      .toLowerCase()
 
     return logs.filter((log) => {
-      const action = normaliseAction(log.action)
+      const action =
+        normaliseAction(log.action)
+
       const entityType = String(
         log.entity_type || '',
       ).toLowerCase()
-      const entityName = String(
-        log.entity_name || '',
+
+      const entityName = getEntityName(
+        log,
       ).toLowerCase()
-      const userEmail = String(
-        log.user_email || '',
+
+      const userEmail = getUserEmail(
+        log,
       ).toLowerCase()
+
       const friendlyDetail =
-        getFriendlyDetail(log).toLowerCase()
-      const safeDetails = getSafeDetailEntries(log.details)
-        .map(([key, value]) => `${key} ${value}`)
-        .join(' ')
-        .toLowerCase()
+        getFriendlyDetail(
+          log,
+        ).toLowerCase()
+
+      const safeDetails =
+        getSafeDetailEntries(log.details)
+          .map(
+            ([key, value]) =>
+              `${key} ${formatDetailValue(
+                value,
+              )}`,
+          )
+          .join(' ')
+          .toLowerCase()
 
       const matchesSearch =
         !term ||
@@ -414,11 +922,19 @@ export default function AuditLogs({ profile }) {
 
       const matchesFilter =
         actionFilter === 'all' ||
-        getActionCategory(log.action) === actionFilter
+        getActionCategory(log.action) ===
+          actionFilter
 
-      return matchesSearch && matchesFilter
+      return (
+        matchesSearch &&
+        matchesFilter
+      )
     })
-  }, [actionFilter, logs, search])
+  }, [
+    actionFilter,
+    logs,
+    search,
+  ])
 
   const categoryCounts = useMemo(() => {
     const counts = {
@@ -431,7 +947,9 @@ export default function AuditLogs({ profile }) {
     }
 
     logs.forEach((log) => {
-      const category = getActionCategory(log.action)
+      const category =
+        getActionCategory(log.action)
+
       counts[category] += 1
     })
 
@@ -439,14 +957,43 @@ export default function AuditLogs({ profile }) {
   }, [logs])
 
   const activeFilterLabel =
-    ACTION_META[actionFilter]?.label || 'Audit Logs'
+    ACTION_META[actionFilter]?.label ||
+    'Audit Logs'
+
+  if (!hasAuditPermission) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.accessDeniedCard}>
+          <div style={styles.accessDeniedIcon}>
+            !
+          </div>
+
+          <h1 style={styles.accessDeniedTitle}>
+            Audit log access restricted
+          </h1>
+
+          <p style={styles.accessDeniedText}>
+            You are signed in as{' '}
+            <strong>
+              {titleCase(profileRole) ||
+                'a restricted user'}
+            </strong>
+            . Only administrators and compliance
+            officers can view the organisation’s
+            audit trail.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   if (!companyId) {
     return (
       <div style={styles.page}>
         <div style={styles.errorPanel}>
-          Your account is not assigned to a company. Sign out and
-          contact an administrator.
+          Your account is not assigned to a
+          company. Sign out and contact a Trustera
+          administrator.
         </div>
       </div>
     )
@@ -456,107 +1003,163 @@ export default function AuditLogs({ profile }) {
     <div style={styles.page}>
       <div style={styles.headerRow}>
         <div>
-          <div style={styles.eyebrow}>ACCOUNTABILITY RECORD</div>
+          <div style={styles.eyebrow}>
+            ACCOUNTABILITY RECORD
+          </div>
 
-          <h1 style={styles.pageTitle}>Audit Logs</h1>
+          <h1 style={styles.pageTitle}>
+            Audit Logs
+          </h1>
 
           <p style={styles.subText}>
-            Review important system activity and administrative
-            actions recorded for your organisation.
+            Review important system activity and
+            administrative actions recorded for
+            your organisation.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => fetchLogs({ showLoading: false })}
+          onClick={() =>
+            fetchLogs({
+              showLoading: false,
+            })
+          }
           style={{
             ...styles.refreshButton,
-            ...(refreshing ? styles.disabledButton : {}),
+            ...(refreshing
+              ? styles.disabledButton
+              : {}),
           }}
           disabled={refreshing}
         >
-          {refreshing ? 'Refreshing...' : 'Refresh'}
+          {refreshing
+            ? 'Refreshing...'
+            : 'Refresh'}
         </button>
       </div>
 
+      {loadError && (
+        <div style={styles.errorBanner}>
+          <strong>
+            Audit logs could not be loaded.
+          </strong>
+
+          <span>{loadError}</span>
+        </div>
+      )}
+
       <div style={styles.statsGrid}>
-        {['all', 'create', 'update', 'delete', 'access'].map(
-          (category) => (
-            <StatCard
-              key={category}
-              meta={ACTION_META[category]}
-              value={categoryCounts[category]}
-              active={actionFilter === category}
-              onClick={() => setActionFilter(category)}
-            />
-          ),
-        )}
+        {[
+          'all',
+          'create',
+          'update',
+          'delete',
+          'access',
+        ].map((category) => (
+          <StatCard
+            key={category}
+            meta={ACTION_META[category]}
+            value={
+              categoryCounts[category]
+            }
+            active={
+              actionFilter === category
+            }
+            onClick={() =>
+              setActionFilter(category)
+            }
+          />
+        ))}
       </div>
 
       <div style={styles.legendCard}>
         <div>
-          <h2 style={styles.sectionTitle}>Action legend</h2>
+          <h2 style={styles.sectionTitle}>
+            Action legend
+          </h2>
 
           <p style={styles.sectionText}>
-            Each colour identifies the type of activity recorded in
-            the audit trail.
+            Each colour identifies the type of
+            activity recorded in the audit trail.
           </p>
         </div>
 
         <div style={styles.legendGrid}>
-          {['create', 'update', 'delete', 'access', 'other'].map(
-            (category) => {
-              const meta = ACTION_META[category]
+          {[
+            'create',
+            'update',
+            'delete',
+            'access',
+            'other',
+          ].map((category) => {
+            const meta =
+              ACTION_META[category]
 
-              return (
-                <button
-                  key={category}
-                  type="button"
-                  onClick={() => setActionFilter(category)}
+            return (
+              <button
+                key={category}
+                type="button"
+                onClick={() =>
+                  setActionFilter(category)
+                }
+                style={{
+                  ...styles.legendItem,
+                  ...(actionFilter ===
+                  category
+                    ? styles.legendItemActive
+                    : {}),
+                }}
+              >
+                <span
                   style={{
-                    ...styles.legendItem,
-                    ...(actionFilter === category
-                      ? styles.legendItemActive
-                      : {}),
+                    ...styles.legendIcon,
+                    background:
+                      meta.accent,
                   }}
                 >
-                  <span
-                    style={{
-                      ...styles.legendIcon,
-                      background: meta.accent,
-                    }}
+                  {meta.icon}
+                </span>
+
+                <span>
+                  <strong
+                    style={
+                      styles.legendLabel
+                    }
                   >
-                    {meta.icon}
-                  </span>
+                    {meta.label}
+                  </strong>
 
-                  <span>
-                    <strong style={styles.legendLabel}>
-                      {meta.label}
-                    </strong>
-
-                    <span style={styles.legendDescription}>
-                      {meta.description}
-                    </span>
+                  <span
+                    style={
+                      styles.legendDescription
+                    }
+                  >
+                    {meta.description}
                   </span>
-                </button>
-              )
-            },
-          )}
+                </span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
       <div style={styles.filterCard}>
         <div style={styles.filterHeader}>
           <div>
-            <h2 style={styles.sectionTitle}>Activity history</h2>
+            <h2 style={styles.sectionTitle}>
+              Activity history
+            </h2>
 
             <p style={styles.sectionText}>
-              Showing {filteredLogs.length} of {logs.length} records ·{' '}
+              Showing {filteredLogs.length} of{' '}
+              {logs.length} records ·{' '}
               {activeFilterLabel}
             </p>
           </div>
 
-          {(actionFilter !== 'all' || search) && (
+          {(actionFilter !== 'all' ||
+            search) && (
             <button
               type="button"
               onClick={() => {
@@ -572,13 +1175,19 @@ export default function AuditLogs({ profile }) {
 
         <div style={styles.filterRow}>
           <div style={styles.searchWrapper}>
-            <span style={styles.searchIcon}>⌕</span>
+            <span style={styles.searchIcon}>
+              ⌕
+            </span>
 
             <input
               type="text"
               placeholder="Search by action, entity, user or details..."
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) =>
+                setSearch(
+                  event.target.value,
+                )
+              }
               style={styles.searchInput}
             />
           </div>
@@ -586,31 +1195,61 @@ export default function AuditLogs({ profile }) {
           <select
             value={actionFilter}
             onChange={(event) =>
-              setActionFilter(event.target.value)
+              setActionFilter(
+                event.target.value,
+              )
             }
             style={styles.filterSelect}
           >
-            <option value="all">All Actions</option>
-            <option value="create">Create</option>
-            <option value="update">Update</option>
-            <option value="delete">Delete</option>
-            <option value="access">Access</option>
-            <option value="other">Other</option>
+            <option value="all">
+              All Actions
+            </option>
+
+            <option value="create">
+              Create
+            </option>
+
+            <option value="update">
+              Update
+            </option>
+
+            <option value="delete">
+              Delete
+            </option>
+
+            <option value="access">
+              Access
+            </option>
+
+            <option value="other">
+              Other
+            </option>
           </select>
         </div>
       </div>
 
       {loading ? (
         <div style={styles.emptyState}>
-          <div style={styles.emptyIcon}>◌</div>
-          <strong>Loading audit logs...</strong>
+          <div style={styles.spinner} />
+
+          <strong>
+            Loading audit logs...
+          </strong>
         </div>
       ) : filteredLogs.length === 0 ? (
         <div style={styles.emptyState}>
-          <div style={styles.emptyIcon}>✓</div>
-          <strong>No matching audit logs found.</strong>
+          <div style={styles.emptyIcon}>
+            ✓
+          </div>
+
+          <strong>
+            No matching audit logs found.
+          </strong>
+
           <span style={styles.emptySubText}>
-            Try changing the action filter or search term.
+            {logs.length === 0
+              ? 'No audit activity has been recorded for this organisation yet.'
+              : 'Try changing the action filter or search term.'}
           </span>
         </div>
       ) : (
@@ -619,79 +1258,150 @@ export default function AuditLogs({ profile }) {
             <table style={styles.table}>
               <thead>
                 <tr>
-                  <th style={styles.th}>Action</th>
-                  <th style={styles.th}>Entity Type</th>
-                  <th style={styles.th}>Entity</th>
-                  <th style={styles.th}>Details</th>
-                  <th style={styles.th}>User</th>
-                  <th style={styles.th}>Logged At</th>
+                  <th style={styles.th}>
+                    Action
+                  </th>
+
+                  <th style={styles.th}>
+                    Entity Type
+                  </th>
+
+                  <th style={styles.th}>
+                    Entity
+                  </th>
+
+                  <th style={styles.th}>
+                    Details
+                  </th>
+
+                  <th style={styles.th}>
+                    User
+                  </th>
+
+                  <th style={styles.th}>
+                    Logged At
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
                 {filteredLogs.map((log) => {
                   const appearance =
-                    getActionAppearance(log.action)
-                  const safeDetails = getSafeDetailEntries(
-                    log.details,
-                  )
-                  const isExpanded = expandedLogId === log.id
+                    getActionAppearance(
+                      log.action,
+                    )
+
+                  const safeDetails =
+                    getSafeDetailEntries(
+                      log.details,
+                    )
+
+                  const isExpanded =
+                    expandedLogId === log.id
+
+                  const userEmail =
+                    getUserEmail(log)
+
+                  const isCurrentUser =
+                    userEmail &&
+                    currentUserEmail &&
+                    userEmail.toLowerCase() ===
+                      currentUserEmail.toLowerCase()
 
                   return (
-                    <tr key={log.id} style={styles.tableRow}>
+                    <tr
+                      key={log.id}
+                      style={styles.tableRow}
+                    >
                       <td style={styles.td}>
                         <span
                           style={{
                             ...styles.badge,
-                            background: appearance.background,
-                            color: appearance.color,
+                            background:
+                              appearance.background,
+                            color:
+                              appearance.color,
                             border: `1px solid ${appearance.border}`,
                           }}
                         >
-                          <span style={styles.badgeIcon}>
+                          <span
+                            style={
+                              styles.badgeIcon
+                            }
+                          >
                             {appearance.icon}
                           </span>
 
-                          {formatAction(log.action)}
+                          {formatAction(
+                            log.action,
+                          )}
                         </span>
                       </td>
 
                       <td style={styles.td}>
-                        <span style={styles.entityTypeBadge}>
-                          {formatEntityType(log.entity_type)}
+                        <span
+                          style={
+                            styles.entityTypeBadge
+                          }
+                        >
+                          {formatEntityType(
+                            log.entity_type,
+                          )}
                         </span>
                       </td>
 
                       <td style={styles.td}>
-                        <div style={styles.entityName}>
-                          {log.entity_name || '-'}
+                        <div
+                          style={
+                            styles.entityName
+                          }
+                        >
+                          {getEntityName(log)}
                         </div>
                       </td>
 
-                      <td style={styles.detailsCell}>
-                        <div style={styles.detailSummary}>
+                      <td
+                        style={
+                          styles.detailsCell
+                        }
+                      >
+                        <div
+                          style={
+                            styles.detailSummary
+                          }
+                        >
                           <span
                             style={{
                               ...styles.detailIcon,
-                              background: appearance.accent,
+                              background:
+                                appearance.accent,
                             }}
                           >
                             {appearance.icon}
                           </span>
 
-                          <span>{getFriendlyDetail(log)}</span>
+                          <span>
+                            {getFriendlyDetail(
+                              log,
+                            )}
+                          </span>
                         </div>
 
-                        {safeDetails.length > 0 && (
+                        {safeDetails.length >
+                          0 && (
                           <>
                             <button
                               type="button"
                               onClick={() =>
                                 setExpandedLogId(
-                                  isExpanded ? null : log.id,
+                                  isExpanded
+                                    ? null
+                                    : log.id,
                                 )
                               }
-                              style={styles.detailsToggle}
+                              style={
+                                styles.detailsToggle
+                              }
                             >
                               {isExpanded
                                 ? 'Hide details'
@@ -699,21 +1409,44 @@ export default function AuditLogs({ profile }) {
                             </button>
 
                             {isExpanded && (
-                              <dl style={styles.detailsList}>
-                                {safeDetails.map(([key, value]) => (
-                                  <div
-                                    key={key}
-                                    style={styles.detailsItem}
-                                  >
-                                    <dt style={styles.detailsKey}>
-                                      {humaniseKey(key)}
-                                    </dt>
+                              <dl
+                                style={
+                                  styles.detailsList
+                                }
+                              >
+                                {safeDetails.map(
+                                  ([
+                                    key,
+                                    value,
+                                  ]) => (
+                                    <div
+                                      key={key}
+                                      style={
+                                        styles.detailsItem
+                                      }
+                                    >
+                                      <dt
+                                        style={
+                                          styles.detailsKey
+                                        }
+                                      >
+                                        {humaniseKey(
+                                          key,
+                                        )}
+                                      </dt>
 
-                                    <dd style={styles.detailsValue}>
-                                      {String(value)}
-                                    </dd>
-                                  </div>
-                                ))}
+                                      <dd
+                                        style={
+                                          styles.detailsValue
+                                        }
+                                      >
+                                        {formatDetailValue(
+                                          value,
+                                        )}
+                                      </dd>
+                                    </div>
+                                  ),
+                                )}
                               </dl>
                             )}
                           </>
@@ -721,21 +1454,50 @@ export default function AuditLogs({ profile }) {
                       </td>
 
                       <td style={styles.td}>
-                        <div style={styles.userCell}>
-                          <span style={styles.userAvatar}>
+                        <div
+                          style={
+                            styles.userCell
+                          }
+                        >
+                          <span
+                            style={
+                              styles.userAvatar
+                            }
+                          >
                             {String(
-                              log.user_email || 'U',
+                              userEmail || 'S',
                             )
                               .charAt(0)
                               .toUpperCase()}
                           </span>
 
-                          <span>{log.user_email || '-'}</span>
+                          <span
+                            style={
+                              styles.userIdentity
+                            }
+                          >
+                            <span>
+                              {userEmail ||
+                                'System'}
+                            </span>
+
+                            {isCurrentUser && (
+                              <span
+                                style={
+                                  styles.youBadge
+                                }
+                              >
+                                You
+                              </span>
+                            )}
+                          </span>
                         </div>
                       </td>
 
                       <td style={styles.td}>
-                        {formatDate(log.created_at)}
+                        {formatDate(
+                          log.created_at,
+                        )}
                       </td>
                     </tr>
                   )
@@ -749,14 +1511,21 @@ export default function AuditLogs({ profile }) {
   )
 }
 
-function StatCard({ meta, value, active, onClick }) {
+function StatCard({
+  meta,
+  value,
+  active,
+  onClick,
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       style={{
         ...styles.statCard,
-        ...(active ? styles.statCardActive : {}),
+        ...(active
+          ? styles.statCardActive
+          : {}),
       }}
     >
       <span
@@ -769,9 +1538,17 @@ function StatCard({ meta, value, active, onClick }) {
       </span>
 
       <span style={styles.statText}>
-        <strong style={styles.statValue}>{value}</strong>
-        <span style={styles.statTitle}>{meta.label}</span>
-        <span style={styles.statDescription}>
+        <strong style={styles.statValue}>
+          {value}
+        </strong>
+
+        <span style={styles.statTitle}>
+          {meta.label}
+        </span>
+
+        <span
+          style={styles.statDescription}
+        >
           {meta.description}
         </span>
       </span>
@@ -784,7 +1561,7 @@ const styles = {
     padding: '32px',
     color: '#ffffff',
     background: '#020617',
-    minHeight: '100vh',
+    minHeight: 'calc(100vh - 72px)',
   },
 
   eyebrow: {
@@ -833,6 +1610,18 @@ const styles = {
     opacity: 0.6,
   },
 
+  errorBanner: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    marginBottom: '20px',
+    padding: '14px 16px',
+    border: '1px solid #991b1b',
+    borderRadius: '10px',
+    background: '#450a0a',
+    color: '#fecaca',
+  },
+
   statsGrid: {
     display: 'grid',
     gridTemplateColumns:
@@ -858,7 +1647,8 @@ const styles = {
 
   statCardActive: {
     border: '1px solid #60a5fa',
-    boxShadow: '0 0 0 1px rgba(96, 165, 250, 0.2)',
+    boxShadow:
+      '0 0 0 1px rgba(96, 165, 250, 0.2)',
   },
 
   statIcon: {
@@ -1179,6 +1969,14 @@ const styles = {
     gap: '9px',
   },
 
+  userIdentity: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '6px',
+    overflowWrap: 'anywhere',
+  },
+
   userAvatar: {
     width: '28px',
     height: '28px',
@@ -1189,6 +1987,17 @@ const styles = {
     background: '#2563eb',
     color: '#ffffff',
     fontSize: '12px',
+    fontWeight: 800,
+  },
+
+  youBadge: {
+    display: 'inline-block',
+    padding: '2px 6px',
+    borderRadius: '999px',
+    border: '1px solid #1d4ed8',
+    background: '#172554',
+    color: '#bfdbfe',
+    fontSize: '10px',
     fontWeight: 800,
   },
 
@@ -1220,6 +2029,53 @@ const styles = {
   emptySubText: {
     color: '#94a3b8',
     fontSize: '13px',
+  },
+
+  spinner: {
+    width: '38px',
+    height: '38px',
+    border: '4px solid #1e293b',
+    borderTopColor: '#3b82f6',
+    borderRadius: '999px',
+    animation:
+      'trustera-dashboard-spin 0.8s linear infinite',
+  },
+
+  accessDeniedCard: {
+    width: '100%',
+    maxWidth: '580px',
+    margin: '90px auto',
+    padding: '32px',
+    border: '1px solid #92400e',
+    borderRadius: '16px',
+    background: '#451a03',
+    color: '#fde68a',
+    textAlign: 'center',
+  },
+
+  accessDeniedIcon: {
+    width: '52px',
+    height: '52px',
+    display: 'grid',
+    placeItems: 'center',
+    margin: '0 auto 16px',
+    border: '1px solid #d97706',
+    borderRadius: '50%',
+    background: '#78350f',
+    fontSize: '26px',
+    fontWeight: 900,
+  },
+
+  accessDeniedTitle: {
+    margin: '0 0 10px',
+    color: '#ffffff',
+    fontSize: '24px',
+  },
+
+  accessDeniedText: {
+    margin: 0,
+    color: '#fde68a',
+    lineHeight: 1.65,
   },
 
   errorPanel: {

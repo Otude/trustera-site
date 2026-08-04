@@ -214,6 +214,9 @@ export default function Dashboard({ profile }) {
     useState('')
 
   const companyId = profile?.company_id || null
+  const profileRole = String(profile?.role || '')
+    .trim()
+    .toLowerCase()
 
   const canManageDocuments = can(
     profile,
@@ -231,7 +234,13 @@ export default function Dashboard({ profile }) {
   )
 
   const canCreateNotifications =
-    canManageDocuments && canViewNotifications
+    canManageDocuments &&
+    canViewNotifications &&
+    [
+      'admin',
+      'manager',
+      'compliance_officer',
+    ].includes(profileRole)
 
   const generateNotifications = useCallback(
     async (
@@ -642,11 +651,11 @@ export default function Dashboard({ profile }) {
       workers.filter((worker) => {
         const matchesSite =
           siteFilter === 'all' ||
-          worker.site === siteFilter
+          String(worker.site || '') === siteFilter
 
         const matchesRole =
           roleFilter === 'all' ||
-          worker.role === roleFilter
+          String(worker.role || '') === roleFilter
 
         const matchesStatus =
           workerStatusFilter === 'all' ||
@@ -1328,6 +1337,21 @@ export default function Dashboard({ profile }) {
         </div>
       )}
 
+      {canViewNotifications &&
+        !canCreateNotifications && (
+          <section style={styles.accessNotice}>
+            <strong>
+              Compliance alerts are view-only for your role.
+            </strong>
+
+            <span>
+              Existing alerts remain available in Notifications,
+              but new alert records are generated only by authorised
+              compliance-management roles.
+            </span>
+          </section>
+        )}
+
       {canExportReports ? (
         <section style={styles.exportCard}>
           <div>
@@ -1384,7 +1408,7 @@ export default function Dashboard({ profile }) {
         <section style={styles.accessNotice}>
           <strong>
             Report exports are unavailable for
-            your access role.
+            your current access role.
           </strong>
 
           <span>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 
 import { supabase } from '../supabase'
+import { can } from '../utils/permissions'
 
 const INITIAL_FORM = {
   fullName: '',
@@ -17,11 +18,11 @@ export default function AddWorker({ profile }) {
   const [submitting, setSubmitting] = useState(false)
 
   const activeProfile = profile || localProfile
-  const isAdmin = activeProfile?.role === 'admin'
+  const canManageWorkers = can(activeProfile, 'manageWorkers')
 
   const canSubmit = useMemo(() => {
     return (
-      isAdmin &&
+      canManageWorkers &&
       Boolean(activeProfile?.company_id) &&
       Boolean(formData.fullName.trim()) &&
       Boolean(formData.role.trim()) &&
@@ -33,7 +34,7 @@ export default function AddWorker({ profile }) {
     formData.fullName,
     formData.role,
     formData.site,
-    isAdmin,
+    canManageWorkers,
     submitting,
   ])
 
@@ -65,7 +66,7 @@ export default function AddWorker({ profile }) {
 
         const { data, error } = await supabase
           .from('profiles')
-          .select('id, company_id, email, role')
+          .select('id, company_id, email, full_name, role')
           .eq('id', user.id)
           .single()
 
@@ -174,8 +175,10 @@ export default function AddWorker({ profile }) {
       return
     }
 
-    if (!isAdmin) {
-      toast.error('Only administrators can add workers.')
+    if (!canManageWorkers) {
+      toast.error(
+        'Your role does not allow you to add workers.',
+      )
       return
     }
 
@@ -294,15 +297,15 @@ export default function AddWorker({ profile }) {
           </div>
         )}
 
-        {activeProfile && !isAdmin && (
+        {activeProfile && !canManageWorkers && (
           <div style={styles.warningNotice}>
             You are signed in as{' '}
-            <strong>{activeProfile.role || 'staff'}</strong>. Only
-            administrators can add workers.
+            <strong>{activeProfile.role || 'staff'}</strong>. Your
+            role does not allow you to add workers.
           </div>
         )}
 
-        {isAdmin && activeProfile?.company_id && (
+        {canManageWorkers && activeProfile?.company_id && (
           <form onSubmit={handleSubmit} style={styles.form}>
             <div style={styles.field}>
               <label htmlFor="fullName" style={styles.label}>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
 import { supabase } from '../supabase'
+import { can } from '../utils/permissions'
 
 const DOCUMENTS_BUCKET = 'documents'
 const EXPIRY_WARNING_DAYS = 30
@@ -33,6 +34,10 @@ export default function Documents({ profile }) {
   const [deletingId, setDeletingId] = useState(null)
 
   const companyId = profile?.company_id || null
+  const canManageDocuments = can(
+    profile,
+    'manageDocuments',
+  )
 
   const fetchWorkers = useCallback(async () => {
     if (!companyId) {
@@ -223,6 +228,13 @@ export default function Documents({ profile }) {
   async function uploadDocument(event) {
     event.preventDefault()
 
+    if (!canManageDocuments) {
+      toast.error(
+        'Your role does not allow document uploads.',
+      )
+      return
+    }
+
     if (submitting) return
 
     let uploadedFilePath = null
@@ -368,6 +380,13 @@ export default function Documents({ profile }) {
   }
 
   function startEdit(document) {
+    if (!canManageDocuments) {
+      toast.error(
+        'Your role does not allow document editing.',
+      )
+      return
+    }
+
     if (document.company_id !== companyId) {
       toast.error('You cannot edit another company’s document.')
       return
@@ -390,6 +409,13 @@ export default function Documents({ profile }) {
 
   async function saveEdit(event) {
     event.preventDefault()
+
+    if (!canManageDocuments) {
+      toast.error(
+        'Your role does not allow document editing.',
+      )
+      return
+    }
 
     if (!editingDoc || savingEdit) return
 
@@ -581,6 +607,13 @@ export default function Documents({ profile }) {
   }
 
   async function deleteDocument(document) {
+    if (!canManageDocuments) {
+      toast.error(
+        'Your role does not allow document deletion.',
+      )
+      return
+    }
+
     if (deletingId) return
 
     const confirmed = window.confirm(
@@ -689,12 +722,20 @@ export default function Documents({ profile }) {
     return documents.filter((document) => {
       const matchesSearch =
         !searchTerm ||
-        document.workers?.full_name
-          ?.toLowerCase()
+        String(
+          document.workers?.full_name || '',
+        )
+          .toLowerCase()
           .includes(searchTerm) ||
-        document.document_type?.toLowerCase().includes(searchTerm) ||
-        document.workers?.role?.toLowerCase().includes(searchTerm) ||
-        document.workers?.site?.toLowerCase().includes(searchTerm)
+        String(document.document_type || '')
+          .toLowerCase()
+          .includes(searchTerm) ||
+        String(document.workers?.role || '')
+          .toLowerCase()
+          .includes(searchTerm) ||
+        String(document.workers?.site || '')
+          .toLowerCase()
+          .includes(searchTerm)
 
       const matchesStatus =
         statusFilter === 'all' || document.status === statusFilter
@@ -716,9 +757,26 @@ export default function Documents({ profile }) {
 
   return (
     <div style={styles.page}>
-      <h2 style={styles.heading}>Documents</h2>
+      <div style={styles.pageHeader}>
+        <div>
+          <h2 style={styles.heading}>Documents</h2>
 
-      <form onSubmit={uploadDocument} style={styles.form}>
+          <p style={styles.subText}>
+            View workforce documents, expiry dates and compliance
+            status for your organisation.
+          </p>
+        </div>
+      </div>
+
+      {!canManageDocuments && (
+        <div style={styles.permissionNotice}>
+          You can view documents and open available files, but your
+          role cannot upload, edit or delete document records.
+        </div>
+      )}
+
+      {canManageDocuments && (
+        <form onSubmit={uploadDocument} style={styles.form}>
         <select
           value={selectedWorker}
           onChange={(event) => setSelectedWorker(event.target.value)}
@@ -774,7 +832,8 @@ export default function Documents({ profile }) {
         >
           {submitting ? 'Uploading...' : 'Upload Document'}
         </button>
-      </form>
+        </form>
+      )}
 
       <div style={styles.tableSection}>
         <h2>Uploaded Documents</h2>
@@ -818,7 +877,9 @@ export default function Documents({ profile }) {
                   <th style={styles.th}>Status</th>
                   <th style={styles.th}>Warning</th>
                   <th style={styles.th}>File</th>
-                  <th style={styles.th}>Action</th>
+                  {canManageDocuments && (
+                    <th style={styles.th}>Action</th>
+                  )}
                 </tr>
               </thead>
 
@@ -876,34 +937,36 @@ export default function Documents({ profile }) {
                       </button>
                     </td>
 
-                    <td style={styles.td}>
-                      <div style={styles.actionButtons}>
-                        <button
-                          type="button"
-                          onClick={() => startEdit(document)}
-                          style={styles.editButton}
-                          disabled={deletingId === document.id}
-                        >
-                          Edit
-                        </button>
+                    {canManageDocuments && (
+                      <td style={styles.td}>
+                        <div style={styles.actionButtons}>
+                          <button
+                            type="button"
+                            onClick={() => startEdit(document)}
+                            style={styles.editButton}
+                            disabled={deletingId === document.id}
+                          >
+                            Edit
+                          </button>
 
-                        <button
-                          type="button"
-                          onClick={() => deleteDocument(document)}
-                          style={{
-                            ...styles.deleteButton,
-                            ...(deletingId === document.id
-                              ? styles.disabledButton
-                              : {}),
-                          }}
-                          disabled={deletingId === document.id}
-                        >
-                          {deletingId === document.id
-                            ? 'Deleting...'
-                            : 'Delete'}
-                        </button>
-                      </div>
-                    </td>
+                          <button
+                            type="button"
+                            onClick={() => deleteDocument(document)}
+                            style={{
+                              ...styles.deleteButton,
+                              ...(deletingId === document.id
+                                ? styles.disabledButton
+                                : {}),
+                            }}
+                            disabled={deletingId === document.id}
+                          >
+                            {deletingId === document.id
+                              ? 'Deleting...'
+                              : 'Delete'}
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -912,7 +975,7 @@ export default function Documents({ profile }) {
         )}
       </div>
 
-      {editingDoc && (
+      {editingDoc && canManageDocuments && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
             <h2>Edit Document</h2>
@@ -1023,9 +1086,34 @@ const styles = {
     color: '#ffffff',
   },
 
+  pageHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: '20px',
+    marginBottom: '24px',
+  },
+
   heading: {
     marginTop: 0,
-    marginBottom: '20px',
+    marginBottom: '6px',
+  },
+
+  subText: {
+    margin: 0,
+    color: '#94a3b8',
+    lineHeight: 1.6,
+  },
+
+  permissionNotice: {
+    maxWidth: '760px',
+    marginBottom: '24px',
+    padding: '14px 16px',
+    border: '1px solid #92400e',
+    borderRadius: '10px',
+    background: '#78350f',
+    color: '#fde68a',
+    lineHeight: 1.5,
   },
 
   form: {
