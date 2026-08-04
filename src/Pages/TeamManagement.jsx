@@ -607,8 +607,7 @@ export default function TeamManagement({
               full_name,
               role,
               account_status,
-              created_at,
-              updated_at
+              created_at
             `)
             .eq('company_id', companyId)
             .order('created_at', {
