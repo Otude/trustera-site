@@ -9,6 +9,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from 'react'
 import { Toaster } from 'react-hot-toast'
@@ -59,7 +60,6 @@ function normaliseRole(role) {
     : 'staff'
 }
 
-
 function getEmailPrefix(email) {
   const value = String(email || '').trim()
 
@@ -95,18 +95,68 @@ export default function App() {
     setProfileError,
   ] = useState('')
 
+  /*
+   * Remains available across renders and records
+   * whether App is still mounted.
+   *
+   * This prevents delayed authentication/database
+   * requests from trying to update state after the
+   * component has unmounted.
+   */
+  const mountedRef = useRef(false)
+
+  /*
+   * Every access-context request receives a unique
+   * sequence number.
+   *
+   * Only the most recent request is allowed to update
+   * profile state. This prevents an older Supabase auth
+   * event from overwriting a newer session.
+   */
+  const accessRequestIdRef = useRef(0)
+
+  /*
+   * Stores the timeout created inside
+   * onAuthStateChange so that it can be cancelled
+   * during cleanup or before scheduling another one.
+   */
+  const authTimeoutRef = useRef(null)
+
+  /*
+   * Stores the latest authenticated user ID.
+   *
+   * This provides an additional safeguard against
+   * applying profile information belonging to a user
+   * who is no longer the active session.
+   */
+  const activeUserIdRef = useRef(null)
+
+  const clearScheduledAuthTimeout = useCallback(() => {
+    if (authTimeoutRef.current !== null) {
+      window.clearTimeout(authTimeoutRef.current)
+      authTimeoutRef.current = null
+    }
+  }, [])
+
   const clearAccessState = useCallback(() => {
+    /*
+     * Invalidate any currently running access request.
+     */
+    accessRequestIdRef.current += 1
+    activeUserIdRef.current = null
+
+    if (!mountedRef.current) return
+
     setProfile(null)
     setIsPlatformAdmin(false)
     setProfileError('')
   }, [])
 
-  const markInvitationAsAccepted =
-    useCallback(async (userId) => {
+  const markInvitationAsAccepted = useCallback(
+    async (userId) => {
       if (!userId) return
 
-      const acceptedAt =
-        new Date().toISOString()
+      const acceptedAt = new Date().toISOString()
 
       const { error } = await supabase
         .from('company_invitations')
@@ -129,18 +179,45 @@ export default function App() {
           error,
         )
       }
-    }, [])
+    },
+    [],
+  )
 
   const fetchAccessContext = useCallback(
-    async (user, isMounted = true) => {
-      try {
-        if (!user?.id) {
-          throw new Error(
+    async (user) => {
+      if (!user?.id) {
+        if (mountedRef.current) {
+          setProfile(null)
+          setIsPlatformAdmin(false)
+
+          setProfileError(
             'The authenticated Trustera user could not be identified.',
           )
         }
 
-        if (isMounted) {
+        return null
+      }
+
+      /*
+       * Start a new request and remember the user for
+       * whom the request was created.
+       */
+      const requestId =
+        accessRequestIdRef.current + 1
+
+      accessRequestIdRef.current = requestId
+      activeUserIdRef.current = user.id
+
+      function requestIsCurrent() {
+        return (
+          mountedRef.current &&
+          accessRequestIdRef.current === requestId &&
+          activeUserIdRef.current === user.id
+        )
+      }
+
+      try {
+        if (requestIsCurrent()) {
           setProfileError('')
         }
 
@@ -160,6 +237,15 @@ export default function App() {
             .eq('user_id', user.id)
             .maybeSingle(),
         ])
+
+        /*
+         * Another authentication request may have
+         * started while the database queries were
+         * running.
+         */
+        if (!requestIsCurrent()) {
+          return null
+        }
 
         if (profileResponse.error) {
           throw profileResponse.error
@@ -204,11 +290,10 @@ export default function App() {
                 user.email ||
                 '',
 
-              full_name:
-                resolveProfileName(
-                  profileData,
-                  user,
-                ),
+              full_name: resolveProfileName(
+                profileData,
+                user,
+              ),
 
               role: normaliseRole(
                 profileData.role,
@@ -222,11 +307,10 @@ export default function App() {
               company_id: null,
               email: user.email || '',
 
-              full_name:
-                resolveProfileName(
-                  null,
-                  user,
-                ),
+              full_name: resolveProfileName(
+                null,
+                user,
+              ),
 
               role: 'platform_admin',
 
@@ -258,24 +342,39 @@ export default function App() {
          * invitation as accepted.
          *
          * This operation is intentionally
-         * non-blocking.
+         * non-blocking for authentication.
          */
-        await markInvitationAsAccepted(
-          user.id,
-        )
-
-        if (isMounted) {
-          setProfile(normalisedProfile)
-
-          setIsPlatformAdmin(
-            platformAdmin,
+        try {
+          await markInvitationAsAccepted(
+            user.id,
+          )
+        } catch (invitationError) {
+          console.error(
+            'Invitation lifecycle update failed:',
+            invitationError,
           )
         }
 
+        /*
+         * Recheck after the invitation operation
+         * because the active session may have changed
+         * while it was running.
+         */
+        if (!requestIsCurrent()) {
+          return null
+        }
+
+        setProfile(normalisedProfile)
+
+        setIsPlatformAdmin(
+          platformAdmin,
+        )
+
+        setProfileError('')
+
         return {
           profile: normalisedProfile,
-          isPlatformAdmin:
-            platformAdmin,
+          isPlatformAdmin: platformAdmin,
         }
       } catch (error) {
         console.error(
@@ -283,15 +382,21 @@ export default function App() {
           error,
         )
 
-        if (isMounted) {
-          setProfile(null)
-          setIsPlatformAdmin(false)
-
-          setProfileError(
-            error?.message ||
-              'Unable to load your Trustera user profile.',
-          )
+        /*
+         * Do not show an error from an obsolete
+         * authentication request.
+         */
+        if (!requestIsCurrent()) {
+          return null
         }
+
+        setProfile(null)
+        setIsPlatformAdmin(false)
+
+        setProfileError(
+          error?.message ||
+            'Unable to load your Trustera user profile.',
+        )
 
         return null
       }
@@ -300,7 +405,7 @@ export default function App() {
   )
 
   useEffect(() => {
-    let isMounted = true
+    mountedRef.current = true
 
     async function initialiseAuth() {
       try {
@@ -316,14 +421,18 @@ export default function App() {
           throw error
         }
 
-        if (!isMounted) return
+        if (!mountedRef.current) {
+          return
+        }
 
         setSession(currentSession)
 
         if (currentSession?.user) {
+          activeUserIdRef.current =
+            currentSession.user.id
+
           await fetchAccessContext(
             currentSession.user,
-            isMounted,
           )
         } else {
           clearAccessState()
@@ -334,18 +443,23 @@ export default function App() {
           error,
         )
 
-        if (isMounted) {
-          setSession(null)
-          setProfile(null)
-          setIsPlatformAdmin(false)
-
-          setProfileError(
-            error?.message ||
-              'Unable to initialise your Trustera session.',
-          )
+        if (!mountedRef.current) {
+          return
         }
+
+        accessRequestIdRef.current += 1
+        activeUserIdRef.current = null
+
+        setSession(null)
+        setProfile(null)
+        setIsPlatformAdmin(false)
+
+        setProfileError(
+          error?.message ||
+            'Unable to initialise your Trustera session.',
+        )
       } finally {
-        if (isMounted) {
+        if (mountedRef.current) {
           setLoading(false)
         }
       }
@@ -358,34 +472,76 @@ export default function App() {
     } =
       supabase.auth.onAuthStateChange(
         (_event, updatedSession) => {
-          if (!isMounted) return
+          if (!mountedRef.current) {
+            return
+          }
+
+          /*
+           * Cancel an earlier deferred callback before
+           * scheduling a new one.
+           */
+          clearScheduledAuthTimeout()
+
+          /*
+           * Invalidate any access request created by
+           * an earlier authentication event.
+           */
+          accessRequestIdRef.current += 1
 
           setSession(updatedSession)
 
           if (updatedSession?.user) {
+            activeUserIdRef.current =
+              updatedSession.user.id
+
             setLoading(true)
+            setProfileError('')
 
             /*
-             * Defer database queries until
-             * Supabase completes its internal
-             * authentication state processing.
+             * Defer database queries until Supabase
+             * completes its internal authentication
+             * state processing.
              */
-            window.setTimeout(
-              async () => {
-                if (!isMounted) return
+            authTimeoutRef.current =
+              window.setTimeout(
+                async () => {
+                  authTimeoutRef.current = null
 
-                await fetchAccessContext(
-                  updatedSession.user,
-                  isMounted,
-                )
+                  if (!mountedRef.current) {
+                    return
+                  }
 
-                if (isMounted) {
-                  setLoading(false)
-                }
-              },
-              0,
-            )
+                  const expectedUserId =
+                    updatedSession.user.id
+
+                  /*
+                   * Do not load the profile if another
+                   * auth event has already replaced this
+                   * user.
+                   */
+                  if (
+                    activeUserIdRef.current !==
+                    expectedUserId
+                  ) {
+                    return
+                  }
+
+                  await fetchAccessContext(
+                    updatedSession.user,
+                  )
+
+                  if (
+                    mountedRef.current &&
+                    activeUserIdRef.current ===
+                      expectedUserId
+                  ) {
+                    setLoading(false)
+                  }
+                },
+                0,
+              )
           } else {
+            activeUserIdRef.current = null
             clearAccessState()
             setLoading(false)
           }
@@ -393,11 +549,20 @@ export default function App() {
       )
 
     return () => {
-      isMounted = false
+      mountedRef.current = false
+
+      /*
+       * Invalidate all unresolved profile requests.
+       */
+      accessRequestIdRef.current += 1
+      activeUserIdRef.current = null
+
+      clearScheduledAuthTimeout()
       subscription.unsubscribe()
     }
   }, [
     clearAccessState,
+    clearScheduledAuthTimeout,
     fetchAccessContext,
   ])
 
@@ -417,8 +582,7 @@ export default function App() {
           style: {
             background: '#0f172a',
             color: '#ffffff',
-            border:
-              '1px solid #334155',
+            border: '1px solid #334155',
           },
 
           success: {
@@ -490,9 +654,6 @@ function AuthenticatedApp({
   session,
   isPlatformAdmin,
 }) {
-  const role =
-    normaliseRole(profile?.role)
-
   const hasCompany = Boolean(
     profile?.company_id,
   )
@@ -801,8 +962,7 @@ function LoadingScreen({ message }) {
         style={{
           width: '42px',
           height: '42px',
-          border:
-            '4px solid #334155',
+          border: '4px solid #334155',
           borderTopColor: '#2563eb',
           borderRadius: '50%',
           animation:

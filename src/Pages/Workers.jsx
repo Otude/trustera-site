@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
@@ -11,17 +16,55 @@ export default function Workers({ profile }) {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
-  const [editingWorker, setEditingWorker] = useState(null)
-  const [editFullName, setEditFullName] = useState('')
+  const [editingWorker, setEditingWorker] =
+    useState(null)
+  const [editFullName, setEditFullName] =
+    useState('')
   const [editRole, setEditRole] = useState('')
   const [editSite, setEditSite] = useState('')
-  const [editStatus, setEditStatus] = useState('active')
+  const [editStatus, setEditStatus] =
+    useState('active')
 
-  const [savingEdit, setSavingEdit] = useState(false)
-  const [deletingId, setDeletingId] = useState(null)
+  const [savingEdit, setSavingEdit] =
+    useState(false)
+  const [deletingId, setDeletingId] =
+    useState(null)
 
   const companyId = profile?.company_id || null
-  const canManageWorkers = can(profile, 'manageWorkers')
+
+  const normalisedRole = String(
+    profile?.role || '',
+  ).toLowerCase()
+
+  /*
+   * Granular permissions are preferred.
+   *
+   * The legacy manageWorkers permission is retained as a
+   * fallback so the page continues to work while permissions.js
+   * is being migrated.
+   *
+   * Under the legacy fallback:
+   * - admin can add, edit and delete
+   * - manager/compliance officer can add and edit
+   * - other roles remain read-only
+   */
+  const legacyCanManageWorkers = can(
+    profile,
+    'manageWorkers',
+  )
+
+  const canAddWorker =
+    can(profile, 'addWorkers') ||
+    legacyCanManageWorkers
+
+  const canEditWorker =
+    can(profile, 'editWorkers') ||
+    legacyCanManageWorkers
+
+  const canDeleteWorker =
+    can(profile, 'deleteWorkers') ||
+    (legacyCanManageWorkers &&
+      normalisedRole === 'admin')
 
   const fetchWorkers = useCallback(
     async ({ showLoading = true } = {}) => {
@@ -51,7 +94,9 @@ export default function Workers({ profile }) {
             created_at
           `)
           .eq('company_id', companyId)
-          .order('created_at', { ascending: false })
+          .order('created_at', {
+            ascending: false,
+          })
 
         if (error) {
           throw error
@@ -59,14 +104,19 @@ export default function Workers({ profile }) {
 
         setWorkers(
           (data || []).filter(
-            (worker) => worker.company_id === companyId,
+            (worker) =>
+              worker.company_id === companyId,
           ),
         )
       } catch (error) {
-        console.error('Unable to load workers:', error)
+        console.error(
+          'Unable to load workers:',
+          error,
+        )
 
         toast.error(
-          error?.message || 'Unable to load workers.',
+          error?.message ||
+            'Unable to load workers.',
         )
       } finally {
         setLoading(false)
@@ -129,8 +179,16 @@ export default function Workers({ profile }) {
     }
   }
 
+  function resetEditForm() {
+    setEditingWorker(null)
+    setEditFullName('')
+    setEditRole('')
+    setEditSite('')
+    setEditStatus('active')
+  }
+
   function startEdit(worker) {
-    if (!canManageWorkers) {
+    if (!canEditWorker) {
       toast.error(
         'Your role does not allow worker editing.',
       )
@@ -152,19 +210,17 @@ export default function Workers({ profile }) {
   }
 
   function closeEditModal() {
-    if (savingEdit) return
+    if (savingEdit) {
+      return
+    }
 
-    setEditingWorker(null)
-    setEditFullName('')
-    setEditRole('')
-    setEditSite('')
-    setEditStatus('active')
+    resetEditForm()
   }
 
   async function saveEdit(event) {
     event.preventDefault()
 
-    if (!canManageWorkers) {
+    if (!canEditWorker) {
       toast.error(
         'Your role does not allow worker editing.',
       )
@@ -176,27 +232,49 @@ export default function Workers({ profile }) {
     }
 
     try {
-      const currentCompanyId = requireCompanyId()
-      const trimmedFullName = editFullName.trim()
+      const currentCompanyId =
+        requireCompanyId()
+
+      const trimmedFullName =
+        editFullName.trim()
       const trimmedRole = editRole.trim()
       const trimmedSite = editSite.trim()
 
-      if (editingWorker.company_id !== currentCompanyId) {
+      if (
+        editingWorker.company_id !==
+        currentCompanyId
+      ) {
         throw new Error(
           'You cannot edit another company’s worker.',
         )
       }
 
       if (!trimmedFullName) {
-        throw new Error('Worker name is required.')
+        throw new Error(
+          'Worker name is required.',
+        )
       }
 
       if (!trimmedRole) {
-        throw new Error('Worker role is required.')
+        throw new Error(
+          'Worker role is required.',
+        )
       }
 
       if (!trimmedSite) {
-        throw new Error('Worker site is required.')
+        throw new Error(
+          'Worker site is required.',
+        )
+      }
+
+      if (
+        !['active', 'inactive'].includes(
+          editStatus,
+        )
+      ) {
+        throw new Error(
+          'Select a valid worker status.',
+        )
       }
 
       setSavingEdit(true)
@@ -208,7 +286,10 @@ export default function Workers({ profile }) {
         status: editingWorker.status,
       }
 
-      const { data: updatedWorker, error } = await supabase
+      const {
+        data: updatedWorker,
+        error,
+      } = await supabase
         .from('workers')
         .update({
           full_name: trimmedFullName,
@@ -227,21 +308,37 @@ export default function Workers({ profile }) {
           status,
           created_at
         `)
-        .single()
+        .maybeSingle()
 
       if (error) {
         throw error
       }
 
+      if (!updatedWorker) {
+        throw new Error(
+          'The worker could not be updated. The record may no longer exist or you may not have permission.',
+        )
+      }
+
+      setWorkers((current) =>
+        current.map((worker) =>
+          worker.id === updatedWorker.id
+            ? updatedWorker
+            : worker,
+        ),
+      )
+
       try {
         await createAuditLog({
           action: 'worker_updated',
           entityId: updatedWorker.id,
-          entityName: updatedWorker.full_name,
+          entityName:
+            updatedWorker.full_name,
           details: {
             previous: previousWorker,
             updated: {
-              full_name: updatedWorker.full_name,
+              full_name:
+                updatedWorker.full_name,
               role: updatedWorker.role,
               site: updatedWorker.site,
               status: updatedWorker.status,
@@ -259,21 +356,20 @@ export default function Workers({ profile }) {
         )
       }
 
-      setWorkers((current) =>
-        current.map((worker) =>
-          worker.id === updatedWorker.id
-            ? updatedWorker
-            : worker,
-        ),
+      toast.success(
+        'Worker updated successfully.',
       )
 
-      toast.success('Worker updated successfully.')
-      closeEditModal()
+      resetEditForm()
     } catch (error) {
-      console.error('Unable to update worker:', error)
+      console.error(
+        'Unable to update worker:',
+        error,
+      )
 
       toast.error(
-        error?.message || 'Unable to update the worker.',
+        error?.message ||
+          'Unable to update the worker.',
       )
     } finally {
       setSavingEdit(false)
@@ -281,7 +377,7 @@ export default function Workers({ profile }) {
   }
 
   async function deleteWorker(worker) {
-    if (!canManageWorkers) {
+    if (!canDeleteWorker) {
       toast.error(
         'Your role does not allow worker deletion.',
       )
@@ -292,29 +388,40 @@ export default function Workers({ profile }) {
       return
     }
 
+    if (worker.company_id !== companyId) {
+      toast.error(
+        'You cannot delete another company’s worker.',
+      )
+      return
+    }
+
+    const workerName =
+      worker.full_name || 'this worker'
+
     const confirmed = window.confirm(
-      `Are you sure you want to delete ${worker.full_name}?`,
+      `Are you sure you want to delete ${workerName}?`,
     )
 
-    if (!confirmed) return
+    if (!confirmed) {
+      return
+    }
 
     try {
-      const currentCompanyId = requireCompanyId()
-
-      if (worker.company_id !== currentCompanyId) {
-        throw new Error(
-          'You cannot delete another company’s worker.',
-        )
-      }
+      const currentCompanyId =
+        requireCompanyId()
 
       setDeletingId(worker.id)
 
       /*
-       * If documents reference workers with a restrictive foreign key,
-       * Supabase will reject this delete until those documents are removed
-       * or the relationship is configured to cascade.
+       * Supabase may reject this operation when documents
+       * reference the worker through a restrictive foreign key.
+       * Those documents must then be removed first or the foreign
+       * key must be configured with an appropriate cascade rule.
        */
-      const { data: deletedWorker, error } = await supabase
+      const {
+        data: deletedWorker,
+        error,
+      } = await supabase
         .from('workers')
         .delete()
         .eq('id', worker.id)
@@ -327,17 +434,31 @@ export default function Workers({ profile }) {
           site,
           status
         `)
-        .single()
+        .maybeSingle()
 
       if (error) {
         throw error
       }
 
+      if (!deletedWorker) {
+        throw new Error(
+          'The worker could not be deleted. The record may no longer exist or you may not have permission.',
+        )
+      }
+
+      setWorkers((current) =>
+        current.filter(
+          (item) =>
+            item.id !== deletedWorker.id,
+        ),
+      )
+
       try {
         await createAuditLog({
           action: 'worker_deleted',
           entityId: deletedWorker.id,
-          entityName: deletedWorker.full_name,
+          entityName:
+            deletedWorker.full_name,
           details: {
             role: deletedWorker.role,
             site: deletedWorker.site,
@@ -355,45 +476,72 @@ export default function Workers({ profile }) {
         )
       }
 
-      setWorkers((current) =>
-        current.filter(
-          (item) => item.id !== deletedWorker.id,
-        ),
+      toast.success(
+        'Worker deleted successfully.',
       )
-
-      toast.success('Worker deleted successfully.')
     } catch (error) {
-      console.error('Unable to delete worker:', error)
-
-      toast.error(
-        error?.message || 'Unable to delete the worker.',
+      console.error(
+        'Unable to delete worker:',
+        error,
       )
+
+      let message =
+        error?.message ||
+        'Unable to delete the worker.'
+
+      if (
+        error?.code === '23503' ||
+        message
+          .toLowerCase()
+          .includes('foreign key')
+      ) {
+        message =
+          'This worker cannot be deleted because documents or other records are still linked to them.'
+      }
+
+      toast.error(message)
     } finally {
       setDeletingId(null)
     }
   }
 
   const filteredWorkers = useMemo(() => {
-    const search = searchTerm.trim().toLowerCase()
+    const search = searchTerm
+      .trim()
+      .toLowerCase()
 
     return workers.filter((worker) => {
-      if (!search) return true
+      if (!search) {
+        return true
+      }
 
       return (
-        worker.full_name?.toLowerCase().includes(search) ||
-        worker.role?.toLowerCase().includes(search) ||
-        worker.site?.toLowerCase().includes(search) ||
-        worker.status?.toLowerCase().includes(search)
+        String(worker.full_name || '')
+          .toLowerCase()
+          .includes(search) ||
+        String(worker.role || '')
+          .toLowerCase()
+          .includes(search) ||
+        String(worker.site || '')
+          .toLowerCase()
+          .includes(search) ||
+        String(worker.status || '')
+          .toLowerCase()
+          .includes(search)
       )
     })
   }, [searchTerm, workers])
+
+  const showActionColumn =
+    canEditWorker || canDeleteWorker
 
   if (!companyId) {
     return (
       <div style={styles.page}>
         <div style={styles.errorPanel}>
-          Your account is not assigned to a company. Sign out
-          and contact an administrator.
+          Your account is not assigned to a
+          company. Sign out and contact an
+          administrator.
         </div>
       </div>
     )
@@ -403,16 +551,18 @@ export default function Workers({ profile }) {
     <div style={styles.page}>
       <div style={styles.headerRow}>
         <div>
-          <h1 style={styles.pageTitle}>Workers</h1>
+          <h1 style={styles.pageTitle}>
+            Workers
+          </h1>
 
           <p style={styles.subText}>
-            View and manage workers belonging to your
-            organisation.
+            View and manage workers belonging
+            to your organisation.
           </p>
         </div>
 
         <div style={styles.headerActions}>
-          {canManageWorkers && (
+          {canAddWorker && (
             <Link
               to="/add-worker"
               style={styles.addWorkerButton}
@@ -424,7 +574,9 @@ export default function Workers({ profile }) {
           <button
             type="button"
             onClick={() =>
-              fetchWorkers({ showLoading: false })
+              fetchWorkers({
+                showLoading: false,
+              })
             }
             style={{
               ...styles.refreshButton,
@@ -434,28 +586,49 @@ export default function Workers({ profile }) {
             }}
             disabled={refreshing}
           >
-            {refreshing ? 'Refreshing...' : 'Refresh'}
+            {refreshing
+              ? 'Refreshing...'
+              : 'Refresh'}
           </button>
         </div>
       </div>
 
-      {!canManageWorkers && (
-        <div style={styles.notice}>
-          You are signed in as{' '}
-          <strong>{profile?.role || 'staff'}</strong>. Your role
-          can view worker records but cannot add, edit or delete
-          them.
-        </div>
-      )}
+      {!canAddWorker &&
+        !canEditWorker &&
+        !canDeleteWorker && (
+          <div style={styles.notice}>
+            You are signed in as{' '}
+            <strong>
+              {profile?.role || 'staff'}
+            </strong>
+            . Your role can view worker
+            records but cannot add, edit or
+            delete them.
+          </div>
+        )}
+
+      {(canAddWorker || canEditWorker) &&
+        !canDeleteWorker && (
+          <div style={styles.informationNotice}>
+            You are signed in as{' '}
+            <strong>
+              {profile?.role || 'user'}
+            </strong>
+            . You can add and edit workers,
+            but only administrators can delete
+            worker records.
+          </div>
+        )}
 
       <input
-        type="text"
+        type="search"
         placeholder="Search workers..."
         value={searchTerm}
         onChange={(event) =>
           setSearchTerm(event.target.value)
         }
         style={styles.search}
+        aria-label="Search workers"
       />
 
       {loading ? (
@@ -464,127 +637,202 @@ export default function Workers({ profile }) {
         </div>
       ) : filteredWorkers.length === 0 ? (
         <div style={styles.emptyState}>
-          No workers match your search.
+          {workers.length === 0
+            ? 'No workers have been added yet.'
+            : 'No workers match your search.'}
         </div>
       ) : (
         <div style={styles.tableWrapper}>
           <table style={styles.table}>
             <thead>
               <tr>
-                <th style={styles.th}>Name</th>
-                <th style={styles.th}>Role</th>
-                <th style={styles.th}>Site</th>
-                <th style={styles.th}>Status</th>
-                <th style={styles.th}>Profile</th>
+                <th style={styles.th}>
+                  Name
+                </th>
 
-                {canManageWorkers && (
-                  <th style={styles.th}>Action</th>
+                <th style={styles.th}>
+                  Role
+                </th>
+
+                <th style={styles.th}>
+                  Site
+                </th>
+
+                <th style={styles.th}>
+                  Status
+                </th>
+
+                <th style={styles.th}>
+                  Profile
+                </th>
+
+                {showActionColumn && (
+                  <th style={styles.th}>
+                    Action
+                  </th>
                 )}
               </tr>
             </thead>
 
             <tbody>
-              {filteredWorkers.map((worker) => {
-                const isDeleting =
-                  deletingId === worker.id
+              {filteredWorkers.map(
+                (worker) => {
+                  const isDeleting =
+                    deletingId === worker.id
 
-                return (
-                  <tr key={worker.id}>
-                    <td style={styles.td}>
-                      {worker.full_name || '-'}
-                    </td>
+                  const isActive =
+                    String(
+                      worker.status || '',
+                    ).toLowerCase() ===
+                    'active'
 
-                    <td style={styles.td}>
-                      {worker.role || '-'}
-                    </td>
-
-                    <td style={styles.td}>
-                      {worker.site || '-'}
-                    </td>
-
-                    <td style={styles.td}>
-                      <span
-                        style={{
-                          ...styles.badge,
-                          ...(worker.status === 'active'
-                            ? styles.activeBadge
-                            : styles.inactiveBadge),
-                        }}
-                      >
-                        {worker.status || 'unknown'}
-                      </span>
-                    </td>
-
-                    <td style={styles.td}>
-                      <Link
-                        to={`/workers/${worker.id}`}
-                        style={styles.linkButton}
-                      >
-                        View
-                      </Link>
-                    </td>
-
-                    {canManageWorkers && (
+                  return (
+                    <tr key={worker.id}>
                       <td style={styles.td}>
-                        <div style={styles.actionButtons}>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              startEdit(worker)
-                            }
-                            style={styles.editButton}
-                            disabled={isDeleting}
-                          >
-                            Edit
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              deleteWorker(worker)
-                            }
-                            style={{
-                              ...styles.deleteButton,
-                              ...(isDeleting
-                                ? styles.disabledButton
-                                : {}),
-                            }}
-                            disabled={isDeleting}
-                          >
-                            {isDeleting
-                              ? 'Deleting...'
-                              : 'Delete'}
-                          </button>
-                        </div>
+                        {worker.full_name ||
+                          '-'}
                       </td>
-                    )}
-                  </tr>
-                )
-              })}
+
+                      <td style={styles.td}>
+                        {worker.role || '-'}
+                      </td>
+
+                      <td style={styles.td}>
+                        {worker.site || '-'}
+                      </td>
+
+                      <td style={styles.td}>
+                        <span
+                          style={{
+                            ...styles.badge,
+                            ...(isActive
+                              ? styles.activeBadge
+                              : styles.inactiveBadge),
+                          }}
+                        >
+                          {worker.status ||
+                            'unknown'}
+                        </span>
+                      </td>
+
+                      <td style={styles.td}>
+                        <Link
+                          to={`/workers/${worker.id}`}
+                          style={
+                            styles.linkButton
+                          }
+                        >
+                          View
+                        </Link>
+                      </td>
+
+                      {showActionColumn && (
+                        <td style={styles.td}>
+                          <div
+                            style={
+                              styles.actionButtons
+                            }
+                          >
+                            {canEditWorker && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  startEdit(
+                                    worker,
+                                  )
+                                }
+                                style={
+                                  styles.editButton
+                                }
+                                disabled={
+                                  isDeleting
+                                }
+                              >
+                                Edit
+                              </button>
+                            )}
+
+                            {canDeleteWorker && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  deleteWorker(
+                                    worker,
+                                  )
+                                }
+                                style={{
+                                  ...styles.deleteButton,
+                                  ...(isDeleting
+                                    ? styles.disabledButton
+                                    : {}),
+                                }}
+                                disabled={
+                                  isDeleting
+                                }
+                              >
+                                {isDeleting
+                                  ? 'Deleting...'
+                                  : 'Delete'}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  )
+                },
+              )}
             </tbody>
           </table>
         </div>
       )}
 
-      {editingWorker && canManageWorkers && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modal}>
-            <h2 style={styles.modalTitle}>Edit Worker</h2>
+      {editingWorker && canEditWorker && (
+        <div
+          style={styles.modalOverlay}
+          role="presentation"
+          onMouseDown={(event) => {
+            if (
+              event.target ===
+              event.currentTarget
+            ) {
+              closeEditModal()
+            }
+          }}
+        >
+          <div
+            style={styles.modal}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-worker-title"
+          >
+            <h2
+              id="edit-worker-title"
+              style={styles.modalTitle}
+            >
+              Edit Worker
+            </h2>
 
             <form
               onSubmit={saveEdit}
               style={styles.modalForm}
             >
               <div>
-                <label style={styles.label}>
+                <label
+                  htmlFor="edit-worker-name"
+                  style={styles.label}
+                >
                   Full name
                 </label>
 
                 <input
+                  id="edit-worker-name"
                   type="text"
                   value={editFullName}
                   onChange={(event) =>
-                    setEditFullName(event.target.value)
+                    setEditFullName(
+                      event.target.value,
+                    )
                   }
                   required
                   disabled={savingEdit}
@@ -593,13 +841,21 @@ export default function Workers({ profile }) {
               </div>
 
               <div>
-                <label style={styles.label}>Role</label>
+                <label
+                  htmlFor="edit-worker-role"
+                  style={styles.label}
+                >
+                  Role
+                </label>
 
                 <input
+                  id="edit-worker-role"
                   type="text"
                   value={editRole}
                   onChange={(event) =>
-                    setEditRole(event.target.value)
+                    setEditRole(
+                      event.target.value,
+                    )
                   }
                   required
                   disabled={savingEdit}
@@ -608,13 +864,21 @@ export default function Workers({ profile }) {
               </div>
 
               <div>
-                <label style={styles.label}>Site</label>
+                <label
+                  htmlFor="edit-worker-site"
+                  style={styles.label}
+                >
+                  Site
+                </label>
 
                 <input
+                  id="edit-worker-site"
                   type="text"
                   value={editSite}
                   onChange={(event) =>
-                    setEditSite(event.target.value)
+                    setEditSite(
+                      event.target.value,
+                    )
                   }
                   required
                   disabled={savingEdit}
@@ -623,18 +887,29 @@ export default function Workers({ profile }) {
               </div>
 
               <div>
-                <label style={styles.label}>Status</label>
+                <label
+                  htmlFor="edit-worker-status"
+                  style={styles.label}
+                >
+                  Status
+                </label>
 
                 <select
+                  id="edit-worker-status"
                   value={editStatus}
                   onChange={(event) =>
-                    setEditStatus(event.target.value)
+                    setEditStatus(
+                      event.target.value,
+                    )
                   }
                   required
                   disabled={savingEdit}
                   style={styles.input}
                 >
-                  <option value="active">Active</option>
+                  <option value="active">
+                    Active
+                  </option>
+
                   <option value="inactive">
                     Inactive
                   </option>
@@ -680,6 +955,7 @@ const styles = {
     color: '#ffffff',
     background: '#020617',
     minHeight: '100vh',
+    boxSizing: 'border-box',
   },
 
   pageTitle: {
@@ -734,7 +1010,17 @@ const styles = {
     padding: '14px',
     borderRadius: '10px',
     border: '1px solid #92400e',
-    maxWidth: '700px',
+    maxWidth: '760px',
+  },
+
+  informationNotice: {
+    marginBottom: '20px',
+    background: '#172554',
+    color: '#bfdbfe',
+    padding: '14px',
+    borderRadius: '10px',
+    border: '1px solid #1d4ed8',
+    maxWidth: '760px',
   },
 
   search: {
@@ -801,6 +1087,7 @@ const styles = {
 
   actionButtons: {
     display: 'flex',
+    flexWrap: 'wrap',
     gap: '10px',
   },
 
