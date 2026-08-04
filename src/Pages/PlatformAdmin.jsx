@@ -72,6 +72,32 @@ function isValidEmail(email) {
   )
 }
 
+
+function getEmailPrefix(email) {
+  const value = String(email || '').trim()
+
+  if (!value) return 'Trustera user'
+
+  return value.includes('@')
+    ? value.split('@')[0]
+    : value
+}
+
+function getSafeUserName(userProfile, matchingInvitation = null) {
+  return (
+    String(userProfile?.full_name || '').trim() ||
+    String(matchingInvitation?.full_name || '').trim() ||
+    getEmailPrefix(userProfile?.email || matchingInvitation?.email)
+  )
+}
+
+function getInvitationDisplayName(invitation) {
+  return (
+    String(invitation?.full_name || '').trim() ||
+    getEmailPrefix(invitation?.email)
+  )
+}
+
 function getCompanyStatusStyle(status) {
   const value = normaliseStatus(status)
 
@@ -114,6 +140,7 @@ function getLeadStatusStyle(status) {
 export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
   const [companies, setCompanies] = useState([])
   const [profiles, setProfiles] = useState([])
+  const [invitations, setInvitations] = useState([])
   const [leads, setLeads] = useState([])
 
   const [loading, setLoading] = useState(true)
@@ -153,6 +180,7 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
         const [
           companiesResponse,
           profilesResponse,
+          invitationsResponse,
           leadsResponse,
         ] = await Promise.all([
           supabase
@@ -176,6 +204,25 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
               full_name,
               role,
               created_at
+            `)
+            .order('created_at', {
+              ascending: false,
+            }),
+
+          supabase
+            .from('company_invitations')
+            .select(`
+              id,
+              company_id,
+              email,
+              full_name,
+              role,
+              status,
+              auth_user_id,
+              invited_at,
+              expires_at,
+              created_at,
+              updated_at
             `)
             .order('created_at', {
               ascending: false,
@@ -208,6 +255,10 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
           throw profilesResponse.error
         }
 
+        if (invitationsResponse.error) {
+          throw invitationsResponse.error
+        }
+
         if (leadsResponse.error) {
           console.warn(
             'Unable to load early-access leads:',
@@ -221,6 +272,10 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
 
         setProfiles(
           profilesResponse.data || [],
+        )
+
+        setInvitations(
+          invitationsResponse.data || [],
         )
 
         setLeads(
@@ -285,6 +340,23 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
       )
       .subscribe()
 
+    const invitationsChannel = supabase
+      .channel('platform-admin-invitations')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'company_invitations',
+        },
+        () => {
+          fetchPlatformData({
+            showLoading: false,
+          })
+        },
+      )
+      .subscribe()
+
     const leadsChannel = supabase
       .channel('platform-admin-leads')
       .on(
@@ -305,6 +377,7 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
     return () => {
       supabase.removeChannel(companiesChannel)
       supabase.removeChannel(profilesChannel)
+      supabase.removeChannel(invitationsChannel)
       supabase.removeChannel(leadsChannel)
     }
   }, [fetchPlatformData, hasPlatformAdminAccess])
@@ -316,6 +389,11 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
           userProfile.company_id === company.id,
       )
 
+      const companyInvitations = invitations.filter(
+        (invitation) =>
+          invitation.company_id === company.id,
+      )
+
       const administrators =
         companyUsers.filter(
           (userProfile) =>
@@ -323,16 +401,25 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
             'admin',
         )
 
+      const adminInvitations =
+        companyInvitations.filter(
+          (invitation) =>
+            normaliseRole(invitation.role) ===
+            'admin',
+        )
+
       return {
         ...company,
         users: companyUsers,
+        invitations: companyInvitations,
+        adminInvitations,
         userCount: companyUsers.length,
         administratorCount:
           administrators.length,
         administrators,
       }
     })
-  }, [companies, profiles])
+  }, [companies, invitations, profiles])
 
   const filteredCompanies = useMemo(() => {
     const search = searchTerm
@@ -529,11 +616,9 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
         'invite-company-user',
         {
           body: {
-            company_id: createdCompany.id,
-            company_name:
-              createdCompany.name,
+            companyId: createdCompany.id,
             email: payload.adminEmail,
-            full_name: payload.adminName,
+            fullName: payload.adminName,
             role: 'admin',
           },
         },
@@ -660,7 +745,26 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
     const administrator =
       company.administrators?.[0]
 
-    if (!administrator?.email) {
+    const administratorInvitation =
+      company.adminInvitations?.find(
+        (invitation) =>
+          ['pending', 'expired', 'accepted'].includes(
+            normaliseStatus(invitation.status),
+          ),
+      ) || company.adminInvitations?.[0]
+
+    const administratorEmail =
+      administrator?.email ||
+      administratorInvitation?.email ||
+      ''
+
+    const administratorName =
+      getSafeUserName(
+        administrator,
+        administratorInvitation,
+      )
+
+    if (!administratorEmail) {
       toast.error(
         'No company administrator email was found.',
       )
@@ -675,12 +779,9 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
         'invite-company-user',
         {
           body: {
-            company_id: company.id,
-            company_name: company.name,
-            email: administrator.email,
-            full_name:
-              administrator.full_name ||
-              administrator.email,
+            companyId: company.id,
+            email: administratorEmail,
+            fullName: administratorName,
             role: 'admin',
             resend: true,
           },
@@ -702,7 +803,7 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
       }
 
       toast.success(
-        `Invitation resent to ${administrator.email}.`,
+        `Invitation resent to ${administratorEmail}.`,
       )
     } catch (error) {
       console.error(
@@ -928,6 +1029,7 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
         <UsersSection
           profiles={profiles}
           companies={companies}
+          invitations={invitations}
         />
       )}
 
@@ -1030,6 +1132,17 @@ function CompaniesSection({
   updateCompanyStatus,
   resendAdministratorInvite,
 }) {
+  const invitationByEmail = useMemo(() => {
+    return Object.fromEntries(
+      (invitations || [])
+        .filter((invitation) => invitation.email)
+        .map((invitation) => [
+          String(invitation.email).toLowerCase(),
+          invitation,
+        ]),
+    )
+  }, [invitations])
+
   return (
     <section style={styles.panel}>
       <div style={styles.panelHeader}>
@@ -1144,13 +1257,14 @@ function CompaniesSection({
 
                   <TableCell>
                     {company.administrators
-                      .length === 0 ? (
+                      .length === 0 &&
+                    company.adminInvitations?.length === 0 ? (
                       <span
                         style={styles.mutedText}
                       >
                         No administrator
                       </span>
-                    ) : (
+                    ) : company.administrators.length > 0 ? (
                       company.administrators.map(
                         (administrator) => (
                           <div
@@ -1162,8 +1276,16 @@ function CompaniesSection({
                             }
                           >
                             <strong>
-                              {administrator.full_name ||
-                                'Company administrator'}
+                              {getSafeUserName(
+                                administrator,
+                                company.adminInvitations?.find(
+                                  (invitation) =>
+                                    String(invitation.email || '')
+                                      .toLowerCase() ===
+                                    String(administrator.email || '')
+                                      .toLowerCase(),
+                                ),
+                              )}
                             </strong>
 
                             <span
@@ -1174,6 +1296,31 @@ function CompaniesSection({
                               {
                                 administrator.email
                               }
+                            </span>
+                          </div>
+                        ),
+                      )
+                    ) : (
+                      company.adminInvitations.map(
+                        (invitation) => (
+                          <div
+                            key={invitation.id}
+                            style={styles.userSummary}
+                          >
+                            <strong>
+                              {getInvitationDisplayName(
+                                invitation,
+                              )}
+                            </strong>
+
+                            <span style={styles.emailText}>
+                              {invitation.email}
+                            </span>
+
+                            <span style={styles.mutedText}>
+                              Invitation {normaliseStatus(
+                                invitation.status,
+                              )}
                             </span>
                           </div>
                         ),
@@ -1209,8 +1356,9 @@ function CompaniesSection({
                         View
                       </button>
 
-                      {company.administrators
-                        .length > 0 && (
+                      {(company.administrators
+                        .length > 0 ||
+                        company.adminInvitations?.length > 0) && (
                         <button
                           type="button"
                           onClick={() =>
@@ -1270,6 +1418,7 @@ function CompaniesSection({
 function UsersSection({
   profiles,
   companies,
+  invitations,
 }) {
   const companyMap = useMemo(() => {
     return Object.fromEntries(
@@ -1339,8 +1488,14 @@ function UsersSection({
                         }
                       >
                         <strong>
-                          {userProfile.full_name ||
-                            'Unnamed user'}
+                          {getSafeUserName(
+                            userProfile,
+                            invitationByEmail[
+                              String(
+                                userProfile.email || '',
+                              ).toLowerCase()
+                            ],
+                          )}
                         </strong>
 
                         <span
@@ -1824,13 +1979,13 @@ function CompanyDetailsModal({
             Company Administrators
           </h3>
 
-          {company.administrators.length ===
-          0 ? (
+          {company.administrators.length === 0 &&
+          company.adminInvitations?.length === 0 ? (
             <p style={styles.mutedText}>
               This company does not yet have an
-              administrator.
+              administrator or administrator invitation.
             </p>
-          ) : (
+          ) : company.administrators.length > 0 ? (
             company.administrators.map(
               (administrator) => (
                 <div
@@ -1841,8 +1996,16 @@ function CompanyDetailsModal({
                 >
                   <div>
                     <strong>
-                      {administrator.full_name ||
-                        'Company administrator'}
+                      {getSafeUserName(
+                        administrator,
+                        company.adminInvitations?.find(
+                          (invitation) =>
+                            String(invitation.email || '')
+                              .toLowerCase() ===
+                            String(administrator.email || '')
+                              .toLowerCase(),
+                        ),
+                      )}
                     </strong>
 
                     <div
@@ -1858,6 +2021,33 @@ function CompanyDetailsModal({
                 </div>
               ),
             )
+          ) : (
+            <div style={styles.modalUserList}>
+              {company.adminInvitations.map(
+                (invitation) => (
+                  <div
+                    key={invitation.id}
+                    style={styles.modalUserCard}
+                  >
+                    <div>
+                      <strong>
+                        {getInvitationDisplayName(
+                          invitation,
+                        )}
+                      </strong>
+
+                      <div style={styles.emailText}>
+                        {invitation.email}
+                      </div>
+                    </div>
+
+                    <StatusBadge
+                      status={invitation.status}
+                    />
+                  </div>
+                ),
+              )}
+            </div>
           )}
         </div>
 
@@ -1882,8 +2072,16 @@ function CompanyDetailsModal({
                   >
                     <div>
                       <strong>
-                        {userProfile.full_name ||
-                          'Unnamed user'}
+                        {getSafeUserName(
+                          userProfile,
+                          company.invitations?.find(
+                            (invitation) =>
+                              String(invitation.email || '')
+                                .toLowerCase() ===
+                              String(userProfile.email || '')
+                                .toLowerCase(),
+                          ),
+                        )}
                       </strong>
 
                       <div
@@ -1908,8 +2106,8 @@ function CompanyDetailsModal({
         </div>
 
         <div style={styles.modalActions}>
-          {company.administrators.length >
-            0 && (
+          {(company.administrators.length > 0 ||
+            company.adminInvitations?.length > 0) && (
             <button
               type="button"
               onClick={() =>

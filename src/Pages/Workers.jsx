@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
 import { supabase } from '../supabase'
+import { can } from '../utils/permissions'
 
 export default function Workers({ profile }) {
   const [workers, setWorkers] = useState([])
@@ -20,7 +21,7 @@ export default function Workers({ profile }) {
   const [deletingId, setDeletingId] = useState(null)
 
   const companyId = profile?.company_id || null
-  const isAdmin = profile?.role === 'admin'
+  const canManageWorkers = can(profile, 'manageWorkers')
 
   const fetchWorkers = useCallback(
     async ({ showLoading = true } = {}) => {
@@ -129,8 +130,10 @@ export default function Workers({ profile }) {
   }
 
   function startEdit(worker) {
-    if (!isAdmin) {
-      toast.error('Only admins can edit workers.')
+    if (!canManageWorkers) {
+      toast.error(
+        'Your role does not allow worker editing.',
+      )
       return
     }
 
@@ -161,8 +164,10 @@ export default function Workers({ profile }) {
   async function saveEdit(event) {
     event.preventDefault()
 
-    if (!isAdmin) {
-      toast.error('Only admins can edit workers.')
+    if (!canManageWorkers) {
+      toast.error(
+        'Your role does not allow worker editing.',
+      )
       return
     }
 
@@ -276,8 +281,10 @@ export default function Workers({ profile }) {
   }
 
   async function deleteWorker(worker) {
-    if (!isAdmin) {
-      toast.error('Only admins can delete workers.')
+    if (!canManageWorkers) {
+      toast.error(
+        'Your role does not allow worker deletion.',
+      )
       return
     }
 
@@ -405,9 +412,14 @@ export default function Workers({ profile }) {
         </div>
 
         <div style={styles.headerActions}>
-          <Link to="/add-worker" style={styles.addWorkerButton}>
-            Add Worker
-          </Link>
+          {canManageWorkers && (
+            <Link
+              to="/add-worker"
+              style={styles.addWorkerButton}
+            >
+              Add Worker
+            </Link>
+          )}
 
           <button
             type="button"
@@ -427,11 +439,11 @@ export default function Workers({ profile }) {
         </div>
       </div>
 
-      {!isAdmin && (
+      {!canManageWorkers && (
         <div style={styles.notice}>
           You are signed in as{' '}
-          <strong>{profile?.role || 'staff'}</strong>. You can
-          view workers, but only admins can edit or delete
+          <strong>{profile?.role || 'staff'}</strong>. Your role
+          can view worker records but cannot add, edit or delete
           them.
         </div>
       )}
@@ -465,7 +477,7 @@ export default function Workers({ profile }) {
                 <th style={styles.th}>Status</th>
                 <th style={styles.th}>Profile</th>
 
-                {isAdmin && (
+                {canManageWorkers && (
                   <th style={styles.th}>Action</th>
                 )}
               </tr>
@@ -512,7 +524,7 @@ export default function Workers({ profile }) {
                       </Link>
                     </td>
 
-                    {isAdmin && (
+                    {canManageWorkers && (
                       <td style={styles.td}>
                         <div style={styles.actionButtons}>
                           <button
@@ -554,7 +566,7 @@ export default function Workers({ profile }) {
         </div>
       )}
 
-      {editingWorker && isAdmin && (
+      {editingWorker && canManageWorkers && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
             <h2 style={styles.modalTitle}>Edit Worker</h2>

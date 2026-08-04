@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 
 import { supabase } from '../supabase'
+import { can } from '../utils/permissions'
 
 const STATUS_META = {
   unread: {
@@ -50,10 +51,24 @@ export default function Notifications({ profile }) {
   const [deletingId, setDeletingId] = useState(null)
 
   const companyId = profile?.company_id || null
+  const role = String(profile?.role || '')
+    .trim()
+    .toLowerCase()
+
+  const canViewNotifications = can(
+    profile,
+    'viewNotifications',
+  )
+
+  const canDeleteNotifications = [
+    'admin',
+    'manager',
+    'compliance_officer',
+  ].includes(role)
 
   const fetchNotifications = useCallback(
     async ({ showLoading = true } = {}) => {
-      if (!companyId) {
+      if (!companyId || !canViewNotifications) {
         setNotifications([])
         setLoading(false)
         setRefreshing(false)
@@ -100,11 +115,11 @@ export default function Notifications({ profile }) {
         setRefreshing(false)
       }
     },
-    [companyId],
+    [canViewNotifications, companyId],
   )
 
   useEffect(() => {
-    if (!companyId) {
+    if (!companyId || !canViewNotifications) {
       setNotifications([])
       setLoading(false)
       return undefined
@@ -150,7 +165,7 @@ export default function Notifications({ profile }) {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [companyId, fetchNotifications])
+  }, [canViewNotifications, companyId, fetchNotifications])
 
   function requireCompanyId() {
     if (!companyId) {
@@ -161,7 +176,13 @@ export default function Notifications({ profile }) {
   }
 
   async function markAsRead(notification) {
-    if (markingId || notification.is_read) return
+    if (
+      !canViewNotifications ||
+      markingId ||
+      notification.is_read
+    ) {
+      return
+    }
 
     try {
       const currentCompanyId = requireCompanyId()
@@ -214,7 +235,7 @@ export default function Notifications({ profile }) {
   }
 
   async function markAllAsRead() {
-    if (markingAll) return
+    if (!canViewNotifications || markingAll) return
 
     const unreadIds = notifications
       .filter(
@@ -282,6 +303,13 @@ export default function Notifications({ profile }) {
   }
 
   async function deleteNotification(notification) {
+    if (!canDeleteNotifications) {
+      toast.error(
+        'Your role does not allow notification deletion.',
+      )
+      return
+    }
+
     if (deletingId) return
 
     const confirmed = window.confirm(
@@ -422,12 +450,12 @@ export default function Notifications({ profile }) {
 
       const matchesSearch =
         !searchTerm ||
-        item.message?.toLowerCase().includes(searchTerm) ||
-        item.worker_name?.toLowerCase().includes(searchTerm) ||
-        item.document_type?.toLowerCase().includes(searchTerm) ||
+        String(item.message || '').toLowerCase().includes(searchTerm) ||
+        String(item.worker_name || '').toLowerCase().includes(searchTerm) ||
+        String(item.document_type || '').toLowerCase().includes(searchTerm) ||
         status.includes(searchTerm) ||
-        item.expiry_date?.toLowerCase().includes(searchTerm) ||
-        item.severity?.toLowerCase().includes(searchTerm)
+        String(item.expiry_date || '').toLowerCase().includes(searchTerm) ||
+        String(item.severity || '').toLowerCase().includes(searchTerm)
 
       const matchesFilter =
         filter === 'all' ||
@@ -446,6 +474,23 @@ export default function Notifications({ profile }) {
 
     return getStatusMeta(filter).label
   }, [filter])
+
+  if (!canViewNotifications) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.accessDeniedPanel}>
+          <h1 style={styles.accessDeniedTitle}>
+            Notification access restricted
+          </h1>
+
+          <p style={styles.accessDeniedText}>
+            Your current Trustera role does not allow access to
+            organisation notifications.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   if (!companyId) {
     return (
@@ -501,6 +546,13 @@ export default function Notifications({ profile }) {
           </button>
         </div>
       </div>
+
+      {!canDeleteNotifications && (
+        <div style={styles.permissionNotice}>
+          You can review and mark notifications as read, but your
+          role cannot permanently delete notification records.
+        </div>
+      )}
 
       <div style={styles.statsGrid}>
         <StatCard
@@ -767,23 +819,25 @@ export default function Notifications({ profile }) {
                             </button>
                           )}
 
-                          <button
-                            type="button"
-                            onClick={() =>
-                              deleteNotification(item)
-                            }
-                            style={{
-                              ...styles.deleteButton,
-                              ...(isDeleting
-                                ? styles.disabledButton
-                                : {}),
-                            }}
-                            disabled={isDeleting || isMarking}
-                          >
-                            {isDeleting
-                              ? 'Deleting...'
-                              : 'Delete'}
-                          </button>
+                          {canDeleteNotifications && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                deleteNotification(item)
+                              }
+                              style={{
+                                ...styles.deleteButton,
+                                ...(isDeleting
+                                  ? styles.disabledButton
+                                  : {}),
+                              }}
+                              disabled={isDeleting || isMarking}
+                            >
+                              {isDeleting
+                                ? 'Deleting...'
+                                : 'Delete'}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1246,6 +1300,39 @@ const styles = {
   emptySubText: {
     color: '#94a3b8',
     fontSize: '13px',
+  },
+
+  permissionNotice: {
+    maxWidth: '760px',
+    marginBottom: '20px',
+    padding: '14px 16px',
+    border: '1px solid #92400e',
+    borderRadius: '10px',
+    background: '#78350f',
+    color: '#fde68a',
+    lineHeight: 1.5,
+  },
+
+  accessDeniedPanel: {
+    maxWidth: '640px',
+    margin: '80px auto',
+    padding: '28px',
+    border: '1px solid #92400e',
+    borderRadius: '14px',
+    background: '#451a03',
+    color: '#fde68a',
+    textAlign: 'center',
+  },
+
+  accessDeniedTitle: {
+    margin: '0 0 10px',
+    color: '#ffffff',
+    fontSize: '24px',
+  },
+
+  accessDeniedText: {
+    margin: 0,
+    lineHeight: 1.6,
   },
 
   errorPanel: {

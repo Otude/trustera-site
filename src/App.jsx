@@ -14,6 +14,7 @@ import {
 import { Toaster } from 'react-hot-toast'
 
 import { supabase } from './supabase'
+import { can } from './utils/permissions'
 
 import Header from './components/Header'
 
@@ -38,7 +39,8 @@ const PROFILE_FIELDS = `
   created_at
 `
 
-const COMPANY_ROLES = [
+const TRUSTERA_ROLES = [
+  'platform_admin',
   'admin',
   'manager',
   'compliance_officer',
@@ -52,9 +54,29 @@ function normaliseRole(role) {
     .trim()
     .toLowerCase()
 
-  return COMPANY_ROLES.includes(value)
+  return TRUSTERA_ROLES.includes(value)
     ? value
     : 'staff'
+}
+
+
+function getEmailPrefix(email) {
+  const value = String(email || '').trim()
+
+  if (!value) return ''
+
+  return value.includes('@')
+    ? value.split('@')[0]
+    : value
+}
+
+function resolveProfileName(profileData, user) {
+  return (
+    String(profileData?.full_name || '').trim() ||
+    String(user?.user_metadata?.full_name || '').trim() ||
+    String(user?.user_metadata?.name || '').trim() ||
+    getEmailPrefix(user?.email || profileData?.email)
+  )
 }
 
 export default function App() {
@@ -90,7 +112,9 @@ export default function App() {
         .from('company_invitations')
         .update({
           status: 'accepted',
+          auth_user_id: userId,
           accepted_at: acceptedAt,
+          updated_at: acceptedAt,
         })
         .eq('auth_user_id', userId)
         .eq('status', 'pending')
@@ -175,6 +199,17 @@ export default function App() {
           ? {
               ...profileData,
 
+              email:
+                profileData.email ||
+                user.email ||
+                '',
+
+              full_name:
+                resolveProfileName(
+                  profileData,
+                  user,
+                ),
+
               role: normaliseRole(
                 profileData.role,
               ),
@@ -188,13 +223,12 @@ export default function App() {
               email: user.email || '',
 
               full_name:
-                user.user_metadata
-                  ?.full_name ||
-                user.user_metadata
-                  ?.name ||
-                '',
+                resolveProfileName(
+                  null,
+                  user,
+                ),
 
-              role: 'staff',
+              role: 'platform_admin',
 
               created_at:
                 user.created_at || null,
@@ -464,22 +498,20 @@ function AuthenticatedApp({
   )
 
   const canManageTeam =
-    hasCompany && role === 'admin'
+    hasCompany &&
+    can(profile, 'manageTeam')
 
   const canViewAuditLogs =
     hasCompany &&
-    [
-      'admin',
-      'compliance_officer',
-    ].includes(role)
+    can(profile, 'viewAuditLogs')
 
   const canAddWorkers =
     hasCompany &&
-    [
-      'admin',
-      'manager',
-      'compliance_officer',
-    ].includes(role)
+    can(profile, 'manageWorkers')
+
+  const canViewNotifications =
+    hasCompany &&
+    can(profile, 'viewNotifications')
 
   /*
    * A platform administrator without a company
@@ -544,6 +576,7 @@ function AuthenticatedApp({
                   ...profile,
                   role: 'platform_admin',
                 }}
+                isPlatformAdmin
               />
             ) : (
               <Navigate
@@ -667,18 +700,19 @@ function AuthenticatedApp({
         <Route
           path="/notifications"
           element={
-            hasCompany ? (
+            canViewNotifications ? (
               <Notifications
                 profile={profile}
               />
-            ) : isPlatformAdmin ? (
-              <Navigate
-                to="/platform-admin"
-                replace
-              />
             ) : (
               <Navigate
-                to="/"
+                to={
+                  hasCompany
+                    ? '/dashboard'
+                    : isPlatformAdmin
+                      ? '/platform-admin'
+                      : '/'
+                }
                 replace
               />
             )
@@ -691,6 +725,7 @@ function AuthenticatedApp({
             canViewAuditLogs ? (
               <AuditLogs
                 profile={profile}
+                session={session}
               />
             ) : (
               <Navigate
