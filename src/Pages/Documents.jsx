@@ -34,10 +34,33 @@ export default function Documents({ profile }) {
   const [deletingId, setDeletingId] = useState(null)
 
   const companyId = profile?.company_id || null
-  const canManageDocuments = can(
+
+  const legacyCanManageDocuments = can(
     profile,
     'manageDocuments',
   )
+
+  const canViewDocuments =
+    can(profile, 'viewDocuments') ||
+    legacyCanManageDocuments ||
+    Boolean(companyId)
+
+  const canUploadDocuments =
+    can(profile, 'uploadDocuments') ||
+    legacyCanManageDocuments
+
+  const canEditDocuments =
+    can(profile, 'editDocuments') ||
+    legacyCanManageDocuments
+
+  const canDeleteDocuments =
+    can(profile, 'deleteDocuments') ||
+    (
+      legacyCanManageDocuments &&
+      String(profile?.role || '')
+        .trim()
+        .toLowerCase() === 'admin'
+    )
 
   const fetchWorkers = useCallback(async () => {
     if (!companyId) {
@@ -61,7 +84,7 @@ export default function Documents({ profile }) {
   }, [companyId])
 
   const fetchDocuments = useCallback(async () => {
-    if (!companyId) {
+    if (!companyId || !canViewDocuments) {
       setDocuments([])
       return
     }
@@ -186,6 +209,22 @@ export default function Documents({ profile }) {
     return `${companyId}/${workerId}/${uniqueName}`
   }
 
+
+  function getFriendlyErrorMessage(error, fallback) {
+    const message = String(error?.message || fallback || '')
+    const lowerMessage = message.toLowerCase()
+
+    if (
+      error?.code === '42501' ||
+      lowerMessage.includes('row-level security') ||
+      lowerMessage.includes('permission denied')
+    ) {
+      return 'Your account is not permitted to perform this document action.'
+    }
+
+    return message || fallback
+  }
+
   async function createAuditLog({
     action,
     entityType,
@@ -228,7 +267,7 @@ export default function Documents({ profile }) {
   async function uploadDocument(event) {
     event.preventDefault()
 
-    if (!canManageDocuments) {
+    if (!canUploadDocuments) {
       toast.error(
         'Your role does not allow document uploads.',
       )
@@ -373,14 +412,19 @@ export default function Documents({ profile }) {
         }
       }
 
-      toast.error(error?.message || 'Unable to upload the document.')
+      toast.error(
+        getFriendlyErrorMessage(
+          error,
+          'Unable to upload the document.',
+        ),
+      )
     } finally {
       setSubmitting(false)
     }
   }
 
   function startEdit(document) {
-    if (!canManageDocuments) {
+    if (!canEditDocuments) {
       toast.error(
         'Your role does not allow document editing.',
       )
@@ -410,7 +454,7 @@ export default function Documents({ profile }) {
   async function saveEdit(event) {
     event.preventDefault()
 
-    if (!canManageDocuments) {
+    if (!canEditDocuments) {
       toast.error(
         'Your role does not allow document editing.',
       )
@@ -556,7 +600,12 @@ export default function Documents({ profile }) {
         }
       }
 
-      toast.error(error?.message || 'Unable to update the document.')
+      toast.error(
+        getFriendlyErrorMessage(
+          error,
+          'Unable to update the document.',
+        ),
+      )
     } finally {
       setSavingEdit(false)
     }
@@ -607,7 +656,7 @@ export default function Documents({ profile }) {
   }
 
   async function deleteDocument(document) {
-    if (!canManageDocuments) {
+    if (!canDeleteDocuments) {
       toast.error(
         'Your role does not allow document deletion.',
       )
@@ -696,7 +745,12 @@ export default function Documents({ profile }) {
       await fetchDocuments()
     } catch (error) {
       console.error('Document deletion failed:', error)
-      toast.error(error?.message || 'Unable to delete the document.')
+      toast.error(
+        getFriendlyErrorMessage(
+          error,
+          'Unable to delete the document.',
+        ),
+      )
     } finally {
       setDeletingId(null)
     }
@@ -744,6 +798,16 @@ export default function Documents({ profile }) {
     })
   }, [documents, search, statusFilter])
 
+  if (!canViewDocuments) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.errorPanel}>
+          Your current role does not allow access to document records.
+        </div>
+      </div>
+    )
+  }
+
   if (!companyId) {
     return (
       <div style={styles.page}>
@@ -768,14 +832,25 @@ export default function Documents({ profile }) {
         </div>
       </div>
 
-      {!canManageDocuments && (
-        <div style={styles.permissionNotice}>
-          You can view documents and open available files, but your
-          role cannot upload, edit or delete document records.
-        </div>
-      )}
+      {!canUploadDocuments &&
+        !canEditDocuments &&
+        !canDeleteDocuments && (
+          <div style={styles.permissionNotice}>
+            You can view documents and open available files, but your
+            role cannot upload, edit or delete document records.
+          </div>
+        )}
 
-      {canManageDocuments && (
+      {(canUploadDocuments ||
+        canEditDocuments) &&
+        !canDeleteDocuments && (
+          <div style={styles.informationNotice}>
+            Your role can upload or edit document records, but only
+            administrators can permanently delete them.
+          </div>
+        )}
+
+      {canUploadDocuments && (
         <form onSubmit={uploadDocument} style={styles.form}>
         <select
           value={selectedWorker}
@@ -877,7 +952,8 @@ export default function Documents({ profile }) {
                   <th style={styles.th}>Status</th>
                   <th style={styles.th}>Warning</th>
                   <th style={styles.th}>File</th>
-                  {canManageDocuments && (
+                  {(canEditDocuments ||
+                    canDeleteDocuments) && (
                     <th style={styles.th}>Action</th>
                   )}
                 </tr>
@@ -937,33 +1013,38 @@ export default function Documents({ profile }) {
                       </button>
                     </td>
 
-                    {canManageDocuments && (
+                    {(canEditDocuments ||
+                      canDeleteDocuments) && (
                       <td style={styles.td}>
                         <div style={styles.actionButtons}>
-                          <button
-                            type="button"
-                            onClick={() => startEdit(document)}
-                            style={styles.editButton}
-                            disabled={deletingId === document.id}
-                          >
-                            Edit
-                          </button>
+                          {canEditDocuments && (
+                            <button
+                              type="button"
+                              onClick={() => startEdit(document)}
+                              style={styles.editButton}
+                              disabled={deletingId === document.id}
+                            >
+                              Edit
+                            </button>
+                          )}
 
-                          <button
-                            type="button"
-                            onClick={() => deleteDocument(document)}
-                            style={{
-                              ...styles.deleteButton,
-                              ...(deletingId === document.id
-                                ? styles.disabledButton
-                                : {}),
-                            }}
-                            disabled={deletingId === document.id}
-                          >
-                            {deletingId === document.id
-                              ? 'Deleting...'
-                              : 'Delete'}
-                          </button>
+                          {canDeleteDocuments && (
+                            <button
+                              type="button"
+                              onClick={() => deleteDocument(document)}
+                              style={{
+                                ...styles.deleteButton,
+                                ...(deletingId === document.id
+                                  ? styles.disabledButton
+                                  : {}),
+                              }}
+                              disabled={deletingId === document.id}
+                            >
+                              {deletingId === document.id
+                                ? 'Deleting...'
+                                : 'Delete'}
+                            </button>
+                          )}
                         </div>
                       </td>
                     )}
@@ -975,7 +1056,7 @@ export default function Documents({ profile }) {
         )}
       </div>
 
-      {editingDoc && canManageDocuments && (
+      {editingDoc && canEditDocuments && (
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
             <h2>Edit Document</h2>
@@ -1113,6 +1194,17 @@ const styles = {
     borderRadius: '10px',
     background: '#78350f',
     color: '#fde68a',
+    lineHeight: 1.5,
+  },
+
+  informationNotice: {
+    maxWidth: '760px',
+    marginBottom: '24px',
+    padding: '14px 16px',
+    border: '1px solid #1d4ed8',
+    borderRadius: '10px',
+    background: '#172554',
+    color: '#bfdbfe',
     lineHeight: 1.5,
   },
 
