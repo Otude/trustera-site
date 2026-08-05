@@ -17,11 +17,16 @@ const INITIAL_COMPANY_FORM = {
 }
 
 const COMPANY_STATUSES = [
+  'onboarding',
   'active',
-  'pending',
   'suspended',
   'archived',
 ]
+
+const RESENDABLE_INVITATION_STATUSES = new Set([
+  'pending',
+  'expired',
+])
 
 function normaliseRole(role) {
   return String(role || '')
@@ -30,7 +35,13 @@ function normaliseRole(role) {
 }
 
 function normaliseStatus(status) {
-  return String(status || 'pending')
+  return String(status || 'onboarding')
+    .trim()
+    .toLowerCase()
+}
+
+function normaliseEmail(email) {
+  return String(email || '')
     .trim()
     .toLowerCase()
 }
@@ -68,10 +79,9 @@ function formatDateTime(value) {
 
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-    String(email || '').trim(),
+    normaliseEmail(email),
   )
 }
-
 
 function getEmailPrefix(email) {
   const value = String(email || '').trim()
@@ -83,11 +93,19 @@ function getEmailPrefix(email) {
     : value
 }
 
-function getSafeUserName(userProfile, matchingInvitation = null) {
+function getSafeUserName(
+  userProfile,
+  matchingInvitation = null,
+) {
   return (
     String(userProfile?.full_name || '').trim() ||
-    String(matchingInvitation?.full_name || '').trim() ||
-    getEmailPrefix(userProfile?.email || matchingInvitation?.email)
+    String(
+      matchingInvitation?.full_name || '',
+    ).trim() ||
+    getEmailPrefix(
+      userProfile?.email ||
+        matchingInvitation?.email,
+    )
   )
 }
 
@@ -137,21 +155,89 @@ function getLeadStatusStyle(status) {
   return styles.statusPending
 }
 
-export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
+function getMatchingInvitation(
+  invitations,
+  email,
+) {
+  const targetEmail = normaliseEmail(email)
+
+  if (!targetEmail) return null
+
+  return (
+    invitations.find(
+      (invitation) =>
+        normaliseEmail(invitation.email) ===
+        targetEmail,
+    ) || null
+  )
+}
+
+function getLatestResendableAdminInvitation(
+  company,
+) {
+  return (
+    company.adminInvitations?.find(
+      (invitation) =>
+        RESENDABLE_INVITATION_STATUSES.has(
+          normaliseStatus(invitation.status),
+        ),
+    ) || null
+  )
+}
+
+async function getFunctionErrorMessage(
+  error,
+  fallbackMessage,
+) {
+  let message =
+    error?.message || fallbackMessage
+
+  if (!error?.context) {
+    return message
+  }
+
+  try {
+    const responseBody =
+      await error.context.json()
+
+    if (responseBody?.error) {
+      message = responseBody.error
+    } else if (responseBody?.message) {
+      message = responseBody.message
+    }
+  } catch {
+    // Retain the original function error.
+  }
+
+  return message
+}
+
+export default function PlatformAdmin({
+  profile,
+  isPlatformAdmin = false,
+}) {
   const [companies, setCompanies] = useState([])
   const [profiles, setProfiles] = useState([])
-  const [invitations, setInvitations] = useState([])
+  const [invitations, setInvitations] =
+    useState([])
   const [leads, setLeads] = useState([])
 
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+  const [refreshing, setRefreshing] =
+    useState(false)
   const [creatingCompany, setCreatingCompany] =
     useState(false)
+
+  const [resendingCompanyId, setResendingCompanyId] =
+    useState(null)
+  const [updatingCompanyId, setUpdatingCompanyId] =
+    useState(null)
+  const [updatingLeadId, setUpdatingLeadId] =
+    useState(null)
 
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] =
     useState('all')
-
   const [activeTab, setActiveTab] =
     useState('companies')
 
@@ -164,11 +250,16 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
 
   const hasPlatformAdminAccess =
     Boolean(isPlatformAdmin) ||
-    normaliseRole(profile?.role) === 'platform_admin'
+    normaliseRole(profile?.role) ===
+      'platform_admin'
 
   const fetchPlatformData = useCallback(
     async ({ showLoading = true } = {}) => {
-      if (!hasPlatformAdminAccess) return
+      if (!hasPlatformAdminAccess) {
+        setLoading(false)
+        setRefreshing(false)
+        return
+      }
 
       if (showLoading) {
         setLoading(true)
@@ -269,17 +360,16 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
         setCompanies(
           companiesResponse.data || [],
         )
-
         setProfiles(
           profilesResponse.data || [],
         )
-
         setInvitations(
           invitationsResponse.data || [],
         )
-
         setLeads(
-          leadsResponse.data || [],
+          leadsResponse.error
+            ? []
+            : leadsResponse.data || [],
         )
       } catch (error) {
         console.error(
@@ -304,10 +394,12 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
   }, [fetchPlatformData])
 
   useEffect(() => {
-    if (!hasPlatformAdminAccess) return undefined
+    if (!hasPlatformAdminAccess) {
+      return undefined
+    }
 
-    const companiesChannel = supabase
-      .channel('platform-admin-companies')
+    const channel = supabase
+      .channel('platform-administration')
       .on(
         'postgres_changes',
         {
@@ -321,10 +413,6 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
           })
         },
       )
-      .subscribe()
-
-    const profilesChannel = supabase
-      .channel('platform-admin-profiles')
       .on(
         'postgres_changes',
         {
@@ -338,10 +426,6 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
           })
         },
       )
-      .subscribe()
-
-    const invitationsChannel = supabase
-      .channel('platform-admin-invitations')
       .on(
         'postgres_changes',
         {
@@ -355,10 +439,6 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
           })
         },
       )
-      .subscribe()
-
-    const leadsChannel = supabase
-      .channel('platform-admin-leads')
       .on(
         'postgres_changes',
         {
@@ -375,12 +455,12 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
       .subscribe()
 
     return () => {
-      supabase.removeChannel(companiesChannel)
-      supabase.removeChannel(profilesChannel)
-      supabase.removeChannel(invitationsChannel)
-      supabase.removeChannel(leadsChannel)
+      supabase.removeChannel(channel)
     }
-  }, [fetchPlatformData, hasPlatformAdminAccess])
+  }, [
+    fetchPlatformData,
+    hasPlatformAdminAccess,
+  ])
 
   const companyRows = useMemo(() => {
     return companies.map((company) => {
@@ -389,10 +469,12 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
           userProfile.company_id === company.id,
       )
 
-      const companyInvitations = invitations.filter(
-        (invitation) =>
-          invitation.company_id === company.id,
-      )
+      const companyInvitations =
+        invitations.filter(
+          (invitation) =>
+            invitation.company_id ===
+            company.id,
+        )
 
       const administrators =
         companyUsers.filter(
@@ -408,11 +490,20 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
             'admin',
         )
 
+      const pendingAdminInvitations =
+        adminInvitations.filter(
+          (invitation) =>
+            normaliseStatus(
+              invitation.status,
+            ) === 'pending',
+        )
+
       return {
         ...company,
         users: companyUsers,
         invitations: companyInvitations,
         adminInvitations,
+        pendingAdminInvitations,
         userCount: companyUsers.length,
         administratorCount:
           administrators.length,
@@ -420,6 +511,23 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
       }
     })
   }, [companies, invitations, profiles])
+
+  useEffect(() => {
+    if (!selectedCompany?.id) {
+      return
+    }
+
+    const refreshedCompany = companyRows.find(
+      (company) =>
+        company.id === selectedCompany.id,
+    )
+
+    if (refreshedCompany) {
+      setSelectedCompany(refreshedCompany)
+    } else {
+      setSelectedCompany(null)
+    }
+  }, [companyRows, selectedCompany?.id])
 
   const filteredCompanies = useMemo(() => {
     const search = searchTerm
@@ -432,16 +540,22 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
         normaliseStatus(company.status) ===
           statusFilter
 
-      const administratorText =
-        company.administrators
-          .map(
-            (administrator) =>
-              `${administrator.full_name || ''} ${
-                administrator.email || ''
-              }`,
-          )
-          .join(' ')
-          .toLowerCase()
+      const administratorText = [
+        ...company.administrators.map(
+          (administrator) =>
+            `${administrator.full_name || ''} ${
+              administrator.email || ''
+            }`,
+        ),
+        ...company.adminInvitations.map(
+          (invitation) =>
+            `${invitation.full_name || ''} ${
+              invitation.email || ''
+            }`,
+        ),
+      ]
+        .join(' ')
+        .toLowerCase()
 
       const matchesSearch =
         !search ||
@@ -475,13 +589,20 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
 
     const staffUsers =
       profiles.filter((userProfile) =>
-        ['manager', 'staff', 'user'].includes(
+        [
+          'manager',
+          'compliance_officer',
+          'staff',
+          'viewer',
+          'worker',
+          'user',
+        ].includes(
           normaliseRole(userProfile.role),
         ),
       ).length
 
-    const pendingLeads =
-      leads.filter((lead) => {
+    const pendingLeads = leads.filter(
+      (lead) => {
         const status = normaliseStatus(
           lead.status,
         )
@@ -495,7 +616,8 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
             'closed',
           ].includes(status)
         )
-      }).length
+      },
+    ).length
 
     return {
       totalCompanies: companies.length,
@@ -525,10 +647,9 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
         companyForm.companyName.trim(),
       adminName:
         companyForm.adminName.trim(),
-      adminEmail:
-        companyForm.adminEmail
-          .trim()
-          .toLowerCase(),
+      adminEmail: normaliseEmail(
+        companyForm.adminEmail,
+      ),
     }
 
     if (
@@ -565,18 +686,34 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
       return
     }
 
-    const userAlreadyExists =
-      profiles.some(
-        (userProfile) =>
-          String(userProfile.email || '')
-            .trim()
-            .toLowerCase() ===
-          payload.adminEmail,
-      )
+    const userAlreadyExists = profiles.some(
+      (userProfile) =>
+        normaliseEmail(userProfile.email) ===
+        payload.adminEmail,
+    )
 
     if (userAlreadyExists) {
       toast.error(
         'A Trustera user with this email already exists.',
+      )
+      return
+    }
+
+    const invitationAlreadyExists =
+      invitations.some(
+        (invitation) =>
+          normaliseEmail(invitation.email) ===
+            payload.adminEmail &&
+          ['pending', 'accepted'].includes(
+            normaliseStatus(
+              invitation.status,
+            ),
+          ),
+      )
+
+    if (invitationAlreadyExists) {
+      toast.error(
+        'A Trustera invitation already exists for this email address.',
       )
       return
     }
@@ -593,7 +730,7 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
         .from('companies')
         .insert({
           name: payload.companyName,
-          status: 'pending',
+          status: 'onboarding',
         })
         .select(`
           id,
@@ -625,7 +762,13 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
       )
 
       if (invitationError) {
-        throw invitationError
+        const message =
+          await getFunctionErrorMessage(
+            invitationError,
+            'The administrator invitation could not be sent.',
+          )
+
+        throw new Error(message)
       }
 
       if (
@@ -638,18 +781,28 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
         )
       }
 
-      await supabase
-        .from('companies')
-        .update({
-          status: 'active',
-        })
-        .eq('id', createdCompany.id)
+      const { error: activationError } =
+        await supabase
+          .from('companies')
+          .update({
+            status: 'active',
+          })
+          .eq('id', createdCompany.id)
+
+      if (activationError) {
+        throw new Error(
+          `The invitation was sent, but the company could not be activated: ${activationError.message}`,
+        )
+      }
 
       toast.success(
         `${createdCompany.name} was created and the administrator invitation was sent.`,
       )
 
-      setCompanyForm(INITIAL_COMPANY_FORM)
+      setCompanyForm(
+        INITIAL_COMPANY_FORM,
+      )
+      setActiveTab('companies')
 
       await fetchPlatformData({
         showLoading: false,
@@ -661,19 +814,26 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
       )
 
       /*
-       * A company should not normally be deleted
-       * automatically if the invitation fails, because
-       * the failure may be temporary. Keeping it as
-       * "pending" lets the platform administrator retry.
+       * Keep a successfully created company in onboarding
+       * status when a later invitation or activation step
+       * fails. The platform administrator can then review
+       * and retry the onboarding process.
        */
-
       if (createdCompanyId) {
-        await supabase
-          .from('companies')
-          .update({
-            status: 'pending',
-          })
-          .eq('id', createdCompanyId)
+        const { error: onboardingError } =
+          await supabase
+            .from('companies')
+            .update({
+              status: 'onboarding',
+            })
+            .eq('id', createdCompanyId)
+
+        if (onboardingError) {
+          console.error(
+            'Unable to retain onboarding status:',
+            onboardingError,
+          )
+        }
       }
 
       toast.error(
@@ -693,7 +853,28 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
     companyId,
     newStatus,
   ) {
-    if (!companyId) return
+    if (
+      !companyId ||
+      updatingCompanyId ||
+      !COMPANY_STATUSES.includes(newStatus)
+    ) {
+      return
+    }
+
+    const currentCompany =
+      companyRows.find(
+        (company) =>
+          company.id === companyId,
+      )
+
+    if (
+      currentCompany &&
+      normaliseStatus(
+        currentCompany.status,
+      ) === newStatus
+    ) {
+      return
+    }
 
     const confirmed = window.confirm(
       `Change this company’s status to "${newStatus}"?`,
@@ -701,66 +882,91 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
 
     if (!confirmed) return
 
-    const { error } = await supabase
-      .from('companies')
-      .update({
-        status: newStatus,
-      })
-      .eq('id', companyId)
+    setUpdatingCompanyId(companyId)
 
-    if (error) {
+    try {
+      const { error } = await supabase
+        .from('companies')
+        .update({
+          status: newStatus,
+        })
+        .eq('id', companyId)
+
+      if (error) {
+        throw error
+      }
+
+      toast.success(
+        `Company status changed to ${newStatus}.`,
+      )
+
+      setCompanies((current) =>
+        current.map((company) =>
+          company.id === companyId
+            ? {
+                ...company,
+                status: newStatus,
+              }
+            : company,
+        ),
+      )
+
+      await fetchPlatformData({
+        showLoading: false,
+      })
+    } catch (error) {
       console.error(
         'Unable to update company status:',
         error,
       )
 
       toast.error(
-        error.message ||
+        error?.message ||
           'Unable to update the company status.',
       )
-      return
+    } finally {
+      setUpdatingCompanyId(null)
     }
-
-    toast.success(
-      `Company status changed to ${newStatus}.`,
-    )
-
-    setSelectedCompany((current) =>
-      current?.id === companyId
-        ? {
-            ...current,
-            status: newStatus,
-          }
-        : current,
-    )
-
-    await fetchPlatformData({
-      showLoading: false,
-    })
   }
 
   async function resendAdministratorInvite(
     company,
   ) {
-    const administrator =
-      company.administrators?.[0]
+    if (
+      !company?.id ||
+      resendingCompanyId
+    ) {
+      return
+    }
+
+    if (
+      company.administrators?.length > 0
+    ) {
+      toast.error(
+        'This company already has an active administrator account. Change the administrator from Team Management instead of resending an invitation.',
+      )
+      return
+    }
 
     const administratorInvitation =
-      company.adminInvitations?.find(
-        (invitation) =>
-          ['pending', 'expired', 'accepted'].includes(
-            normaliseStatus(invitation.status),
-          ),
-      ) || company.adminInvitations?.[0]
+      getLatestResendableAdminInvitation(
+        company,
+      )
+
+    if (!administratorInvitation) {
+      toast.error(
+        'No pending or expired administrator invitation was found.',
+      )
+      return
+    }
 
     const administratorEmail =
-      administrator?.email ||
-      administratorInvitation?.email ||
-      ''
+      normaliseEmail(
+        administratorInvitation.email,
+      )
 
     const administratorName =
-      getSafeUserName(
-        administrator,
+      getInvitationDisplayName(
         administratorInvitation,
       )
 
@@ -770,6 +976,14 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
       )
       return
     }
+
+    const confirmed = window.confirm(
+      `Send a new administrator invitation to ${administratorEmail}?`,
+    )
+
+    if (!confirmed) return
+
+    setResendingCompanyId(company.id)
 
     try {
       const {
@@ -789,7 +1003,13 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
       )
 
       if (error) {
-        throw error
+        const message =
+          await getFunctionErrorMessage(
+            error,
+            'The invitation could not be resent.',
+          )
+
+        throw new Error(message)
       }
 
       if (
@@ -805,6 +1025,10 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
       toast.success(
         `Invitation resent to ${administratorEmail}.`,
       )
+
+      await fetchPlatformData({
+        showLoading: false,
+      })
     } catch (error) {
       console.error(
         'Unable to resend administrator invitation:',
@@ -815,6 +1039,8 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
         error?.message ||
           'Unable to resend the invitation.',
       )
+    } finally {
+      setResendingCompanyId(null)
     }
   }
 
@@ -822,29 +1048,40 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
     leadId,
     updates,
   ) {
-    const { error } = await supabase
-      .from('early_access_leads')
-      .update(updates)
-      .eq('id', leadId)
+    if (!leadId || updatingLeadId) {
+      return
+    }
 
-    if (error) {
+    setUpdatingLeadId(leadId)
+
+    try {
+      const { error } = await supabase
+        .from('early_access_leads')
+        .update(updates)
+        .eq('id', leadId)
+
+      if (error) {
+        throw error
+      }
+
+      toast.success('Lead updated.')
+
+      await fetchPlatformData({
+        showLoading: false,
+      })
+    } catch (error) {
       console.error(
         'Unable to update lead:',
         error,
       )
 
       toast.error(
-        error.message ||
+        error?.message ||
           'Unable to update the lead.',
       )
-      return
+    } finally {
+      setUpdatingLeadId(null)
     }
-
-    toast.success('Lead updated.')
-
-    await fetchPlatformData({
-      showLoading: false,
-    })
   }
 
   if (!hasPlatformAdminAccess) {
@@ -928,9 +1165,9 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
 
         <StatCard
           icon="👥"
-          label="Staff Users"
+          label="Company Users"
           value={platformStats.staffUsers}
-          description="Managers and company staff"
+          description="Managers, officers, staff, viewers and workers"
           tone="cyan"
         />
 
@@ -1022,6 +1259,12 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
           resendAdministratorInvite={
             resendAdministratorInvite
           }
+          resendingCompanyId={
+            resendingCompanyId
+          }
+          updatingCompanyId={
+            updatingCompanyId
+          }
         />
       )}
 
@@ -1038,6 +1281,9 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
           leads={leads}
           updateLeadStatus={
             updateLeadStatus
+          }
+          updatingLeadId={
+            updatingLeadId
           }
           setCompanyForm={setCompanyForm}
           setActiveTab={setActiveTab}
@@ -1070,6 +1316,12 @@ export default function PlatformAdmin({ profile, isPlatformAdmin = false }) {
           }
           resendAdministratorInvite={
             resendAdministratorInvite
+          }
+          resendingCompanyId={
+            resendingCompanyId
+          }
+          updatingCompanyId={
+            updatingCompanyId
           }
         />
       )}
@@ -1112,9 +1364,7 @@ function StatCard({
           {label}
         </div>
 
-        <div
-          style={styles.statDescription}
-        >
+        <div style={styles.statDescription}>
           {description}
         </div>
       </div>
@@ -1131,18 +1381,9 @@ function CompaniesSection({
   setSelectedCompany,
   updateCompanyStatus,
   resendAdministratorInvite,
+  resendingCompanyId,
+  updatingCompanyId,
 }) {
-  const invitationByEmail = useMemo(() => {
-    return Object.fromEntries(
-      (invitations || [])
-        .filter((invitation) => invitation.email)
-        .map((invitation) => [
-          String(invitation.email).toLowerCase(),
-          invitation,
-        ]),
-    )
-  }, [invitations])
-
   return (
     <section style={styles.panel}>
       <div style={styles.panelHeader}>
@@ -1211,23 +1452,18 @@ function CompaniesSection({
                 <TableHeading>
                   Company
                 </TableHeading>
-
                 <TableHeading>
                   Status
                 </TableHeading>
-
                 <TableHeading>
                   Administrators
                 </TableHeading>
-
                 <TableHeading>
                   Users
                 </TableHeading>
-
                 <TableHeading>
                   Created
                 </TableHeading>
-
                 <TableHeading>
                   Actions
                 </TableHeading>
@@ -1235,178 +1471,228 @@ function CompaniesSection({
             </thead>
 
             <tbody>
-              {companies.map((company) => (
-                <tr key={company.id}>
-                  <TableCell>
-                    <strong>
-                      {company.name}
-                    </strong>
+              {companies.map((company) => {
+                const resendableInvitation =
+                  getLatestResendableAdminInvitation(
+                    company,
+                  )
 
-                    <div
-                      style={styles.identifierText}
-                    >
-                      {company.id}
-                    </div>
-                  </TableCell>
+                const isResending =
+                  resendingCompanyId === company.id
+                const isUpdatingStatus =
+                  updatingCompanyId === company.id
 
-                  <TableCell>
-                    <StatusBadge
-                      status={company.status}
-                    />
-                  </TableCell>
+                return (
+                  <tr key={company.id}>
+                    <TableCell>
+                      <strong>
+                        {company.name}
+                      </strong>
 
-                  <TableCell>
-                    {company.administrators
-                      .length === 0 &&
-                    company.adminInvitations?.length === 0 ? (
-                      <span
-                        style={styles.mutedText}
+                      <div
+                        style={
+                          styles.identifierText
+                        }
                       >
-                        No administrator
-                      </span>
-                    ) : company.administrators.length > 0 ? (
-                      company.administrators.map(
-                        (administrator) => (
-                          <div
-                            key={
-                              administrator.id
-                            }
-                            style={
-                              styles.userSummary
-                            }
-                          >
-                            <strong>
-                              {getSafeUserName(
-                                administrator,
-                                company.adminInvitations?.find(
-                                  (invitation) =>
-                                    String(invitation.email || '')
-                                      .toLowerCase() ===
-                                    String(administrator.email || '')
-                                      .toLowerCase(),
-                                ),
-                              )}
-                            </strong>
+                        {company.id}
+                      </div>
+                    </TableCell>
 
-                            <span
+                    <TableCell>
+                      <StatusBadge
+                        status={company.status}
+                      />
+                    </TableCell>
+
+                    <TableCell>
+                      {company.administrators
+                        .length > 0 ? (
+                        company.administrators.map(
+                          (administrator) => (
+                            <div
+                              key={
+                                administrator.id
+                              }
                               style={
-                                styles.emailText
+                                styles.userSummary
                               }
                             >
-                              {
-                                administrator.email
+                              <strong>
+                                {getSafeUserName(
+                                  administrator,
+                                  getMatchingInvitation(
+                                    company.adminInvitations,
+                                    administrator.email,
+                                  ),
+                                )}
+                              </strong>
+
+                              <span
+                                style={
+                                  styles.emailText
+                                }
+                              >
+                                {
+                                  administrator.email
+                                }
+                              </span>
+
+                              <span
+                                style={
+                                  styles.activeAccountText
+                                }
+                              >
+                                Active account
+                              </span>
+                            </div>
+                          ),
+                        )
+                      ) : company.adminInvitations
+                          ?.length > 0 ? (
+                        company.adminInvitations.map(
+                          (invitation) => (
+                            <div
+                              key={invitation.id}
+                              style={
+                                styles.userSummary
                               }
-                            </span>
-                          </div>
-                        ),
-                      )
-                    ) : (
-                      company.adminInvitations.map(
-                        (invitation) => (
-                          <div
-                            key={invitation.id}
-                            style={styles.userSummary}
-                          >
-                            <strong>
-                              {getInvitationDisplayName(
-                                invitation,
-                              )}
-                            </strong>
+                            >
+                              <strong>
+                                {getInvitationDisplayName(
+                                  invitation,
+                                )}
+                              </strong>
 
-                            <span style={styles.emailText}>
-                              {invitation.email}
-                            </span>
+                              <span
+                                style={
+                                  styles.emailText
+                                }
+                              >
+                                {
+                                  invitation.email
+                                }
+                              </span>
 
-                            <span style={styles.mutedText}>
-                              Invitation {normaliseStatus(
-                                invitation.status,
-                              )}
-                            </span>
-                          </div>
-                        ),
-                      )
-                    )}
-                  </TableCell>
+                              <span
+                                style={
+                                  styles.mutedText
+                                }
+                              >
+                                Invitation{' '}
+                                {normaliseStatus(
+                                  invitation.status,
+                                )}
+                              </span>
+                            </div>
+                          ),
+                        )
+                      ) : (
+                        <span
+                          style={
+                            styles.mutedText
+                          }
+                        >
+                          No administrator
+                        </span>
+                      )}
+                    </TableCell>
 
-                  <TableCell>
-                    {company.userCount}
-                  </TableCell>
+                    <TableCell>
+                      {company.userCount}
+                    </TableCell>
 
-                  <TableCell>
-                    {formatDate(
-                      company.created_at,
-                    )}
-                  </TableCell>
+                    <TableCell>
+                      {formatDate(
+                        company.created_at,
+                      )}
+                    </TableCell>
 
-                  <TableCell>
-                    <div
-                      style={
-                        styles.actionButtons
-                      }
-                    >
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSelectedCompany(
-                            company,
-                          )
+                    <TableCell>
+                      <div
+                        style={
+                          styles.actionButtons
                         }
-                        style={styles.viewButton}
                       >
-                        View
-                      </button>
-
-                      {(company.administrators
-                        .length > 0 ||
-                        company.adminInvitations?.length > 0) && (
                         <button
                           type="button"
                           onClick={() =>
-                            resendAdministratorInvite(
+                            setSelectedCompany(
                               company,
                             )
                           }
                           style={
-                            styles.inviteButton
+                            styles.viewButton
                           }
                         >
-                          Resend Invite
+                          View
                         </button>
-                      )}
 
-                      <select
-                        value={normaliseStatus(
-                          company.status,
-                        )}
-                        onChange={(event) =>
-                          updateCompanyStatus(
-                            company.id,
-                            event.target.value,
-                          )
-                        }
-                        style={
-                          styles.statusSelect
-                        }
-                        aria-label={`Change ${company.name} status`}
-                      >
-                        {COMPANY_STATUSES.map(
-                          (status) => (
-                            <option
-                              key={status}
-                              value={status}
+                        {company.administrators
+                            .length === 0 &&
+                          resendableInvitation && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                resendAdministratorInvite(
+                                  company,
+                                )
+                              }
+                              disabled={
+                                isResending
+                              }
+                              style={{
+                                ...styles.inviteButton,
+                                ...(isResending
+                                  ? styles.disabledButton
+                                  : {}),
+                              }}
                             >
-                              {status
-                                .charAt(0)
-                                .toUpperCase() +
-                                status.slice(1)}
-                            </option>
-                          ),
-                        )}
-                      </select>
-                    </div>
-                  </TableCell>
-                </tr>
-              ))}
+                              {isResending
+                                ? 'Resending...'
+                                : 'Resend Invite'}
+                            </button>
+                          )}
+
+                        <select
+                          value={normaliseStatus(
+                            company.status,
+                          )}
+                          onChange={(event) =>
+                            updateCompanyStatus(
+                              company.id,
+                              event.target.value,
+                            )
+                          }
+                          disabled={
+                            isUpdatingStatus
+                          }
+                          style={{
+                            ...styles.statusSelect,
+                            ...(isUpdatingStatus
+                              ? styles.disabledButton
+                              : {}),
+                          }}
+                          aria-label={`Change ${company.name} status`}
+                        >
+                          {COMPANY_STATUSES.map(
+                            (status) => (
+                              <option
+                                key={status}
+                                value={status}
+                              >
+                                {status
+                                  .charAt(0)
+                                  .toUpperCase() +
+                                  status.slice(1)}
+                              </option>
+                            ),
+                          )}
+                        </select>
+                      </div>
+                    </TableCell>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -1428,6 +1714,22 @@ function UsersSection({
       ]),
     )
   }, [companies])
+
+  const invitationByEmail = useMemo(() => {
+    const map = {}
+
+    invitations.forEach((invitation) => {
+      const email = normaliseEmail(
+        invitation.email,
+      )
+
+      if (!email || map[email]) return
+
+      map[email] = invitation
+    })
+
+    return map
+  }, [invitations])
 
   return (
     <section style={styles.panel}>
@@ -1458,19 +1760,15 @@ function UsersSection({
                 <TableHeading>
                   User
                 </TableHeading>
-
                 <TableHeading>
                   Company
                 </TableHeading>
-
                 <TableHeading>
                   Role
                 </TableHeading>
-
                 <TableHeading>
                   Created
                 </TableHeading>
-
                 <TableHeading>
                   User ID
                 </TableHeading>
@@ -1479,71 +1777,76 @@ function UsersSection({
 
             <tbody>
               {profiles.map(
-                (userProfile) => (
-                  <tr key={userProfile.id}>
-                    <TableCell>
-                      <div
-                        style={
-                          styles.userSummary
-                        }
-                      >
-                        <strong>
-                          {getSafeUserName(
-                            userProfile,
-                            invitationByEmail[
-                              String(
-                                userProfile.email || '',
-                              ).toLowerCase()
-                            ],
-                          )}
-                        </strong>
+                (userProfile) => {
+                  const email =
+                    normaliseEmail(
+                      userProfile.email,
+                    )
 
-                        <span
+                  return (
+                    <tr key={userProfile.id}>
+                      <TableCell>
+                        <div
                           style={
-                            styles.emailText
+                            styles.userSummary
                           }
                         >
-                          {userProfile.email ||
-                            'No email recorded'}
+                          <strong>
+                            {getSafeUserName(
+                              userProfile,
+                              invitationByEmail[
+                                email
+                              ],
+                            )}
+                          </strong>
+
+                          <span
+                            style={
+                              styles.emailText
+                            }
+                          >
+                            {userProfile.email ||
+                              'No email recorded'}
+                          </span>
+                        </div>
+                      </TableCell>
+
+                      <TableCell>
+                        {userProfile.company_id
+                          ? companyMap[
+                              userProfile
+                                .company_id
+                            ] ||
+                            'Unknown company'
+                          : 'Trustera platform'}
+                      </TableCell>
+
+                      <TableCell>
+                        <RoleBadge
+                          role={
+                            userProfile.role
+                          }
+                        />
+                      </TableCell>
+
+                      <TableCell>
+                        {formatDate(
+                          userProfile.created_at,
+                        )}
+                      </TableCell>
+
+                      <TableCell>
+                        <span
+                          style={
+                            styles.identifierText
+                          }
+                        >
+                          {userProfile.id}
                         </span>
-                      </div>
-                    </TableCell>
-
-                    <TableCell>
-                      {userProfile.company_id
-                        ? companyMap[
-                            userProfile
-                              .company_id
-                          ] ||
-                          'Unknown company'
-                        : 'Trustera platform'}
-                    </TableCell>
-
-                    <TableCell>
-                      <RoleBadge
-                        role={
-                          userProfile.role
-                        }
-                      />
-                    </TableCell>
-
-                    <TableCell>
-                      {formatDate(
-                        userProfile.created_at,
-                      )}
-                    </TableCell>
-
-                    <TableCell>
-                      <span
-                        style={
-                          styles.identifierText
-                        }
-                      >
-                        {userProfile.id}
-                      </span>
-                    </TableCell>
-                  </tr>
-                ),
+                      </TableCell>
+                    </tr>
+                  )
+                },
               )}
             </tbody>
           </table>
@@ -1556,13 +1859,13 @@ function UsersSection({
 function LeadsSection({
   leads,
   updateLeadStatus,
+  updatingLeadId,
   setCompanyForm,
   setActiveTab,
 }) {
   function convertLeadToCompanyForm(lead) {
     setCompanyForm({
-      companyName:
-        lead.company || '',
+      companyName: lead.company || '',
       adminName: lead.name || '',
       adminEmail: lead.email || '',
     })
@@ -1599,23 +1902,18 @@ function LeadsSection({
                 <TableHeading>
                   Prospect
                 </TableHeading>
-
                 <TableHeading>
                   Industry
                 </TableHeading>
-
                 <TableHeading>
                   Challenge
                 </TableHeading>
-
                 <TableHeading>
                   Status
                 </TableHeading>
-
                 <TableHeading>
                   Received
                 </TableHeading>
-
                 <TableHeading>
                   Actions
                 </TableHeading>
@@ -1623,128 +1921,155 @@ function LeadsSection({
             </thead>
 
             <tbody>
-              {leads.map((lead) => (
-                <tr key={lead.id}>
-                  <TableCell>
-                    <div
-                      style={styles.userSummary}
-                    >
-                      <strong>
-                        {lead.name ||
-                          'Unnamed prospect'}
-                      </strong>
+              {leads.map((lead) => {
+                const isUpdating =
+                  updatingLeadId === lead.id
 
-                      <span>
-                        {lead.company ||
-                          'No company'}
-                      </span>
-
-                      <span
+                return (
+                  <tr key={lead.id}>
+                    <TableCell>
+                      <div
                         style={
-                          styles.emailText
+                          styles.userSummary
                         }
                       >
-                        {lead.email}
+                        <strong>
+                          {lead.name ||
+                            'Unnamed prospect'}
+                        </strong>
+
+                        <span>
+                          {lead.company ||
+                            'No company'}
+                        </span>
+
+                        <span
+                          style={
+                            styles.emailText
+                          }
+                        >
+                          {lead.email}
+                        </span>
+                      </div>
+                    </TableCell>
+
+                    <TableCell>
+                      {lead.industry || '—'}
+                    </TableCell>
+
+                    <TableCell>
+                      <div
+                        style={
+                          styles.challengeText
+                        }
+                      >
+                        {lead.challenge ||
+                          'No challenge provided.'}
+                      </div>
+                    </TableCell>
+
+                    <TableCell>
+                      <span
+                        style={{
+                          ...styles.statusBadge,
+                          ...getLeadStatusStyle(
+                            lead.status,
+                          ),
+                        }}
+                      >
+                        {lead.status || 'new'}
                       </span>
-                    </div>
-                  </TableCell>
+                    </TableCell>
 
-                  <TableCell>
-                    {lead.industry || '—'}
-                  </TableCell>
+                    <TableCell>
+                      {formatDateTime(
+                        lead.created_at,
+                      )}
+                    </TableCell>
 
-                  <TableCell>
-                    <div
-                      style={
-                        styles.challengeText
-                      }
-                    >
-                      {lead.challenge ||
-                        'No challenge provided.'}
-                    </div>
-                  </TableCell>
+                    <TableCell>
+                      <div
+                        style={
+                          styles.actionButtons
+                        }
+                      >
+                        {!lead.contacted && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateLeadStatus(
+                                lead.id,
+                                {
+                                  contacted: true,
+                                  status:
+                                    'contacted',
+                                },
+                              )
+                            }
+                            disabled={
+                              isUpdating
+                            }
+                            style={{
+                              ...styles.contactButton,
+                              ...(isUpdating
+                                ? styles.disabledButton
+                                : {}),
+                            }}
+                          >
+                            Mark Contacted
+                          </button>
+                        )}
 
-                  <TableCell>
-                    <span
-                      style={{
-                        ...styles.statusBadge,
-                        ...getLeadStatusStyle(
-                          lead.status,
-                        ),
-                      }}
-                    >
-                      {lead.status || 'new'}
-                    </span>
-                  </TableCell>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            convertLeadToCompanyForm(
+                              lead,
+                            )
+                          }
+                          disabled={
+                            isUpdating
+                          }
+                          style={{
+                            ...styles.convertButton,
+                            ...(isUpdating
+                              ? styles.disabledButton
+                              : {}),
+                          }}
+                        >
+                          Create Company
+                        </button>
 
-                  <TableCell>
-                    {formatDateTime(
-                      lead.created_at,
-                    )}
-                  </TableCell>
-
-                  <TableCell>
-                    <div
-                      style={
-                        styles.actionButtons
-                      }
-                    >
-                      {!lead.contacted && (
                         <button
                           type="button"
                           onClick={() =>
                             updateLeadStatus(
                               lead.id,
                               {
-                                contacted: true,
                                 status:
-                                  'contacted',
+                                  'rejected',
                               },
                             )
                           }
-                          style={
-                            styles.contactButton
+                          disabled={
+                            isUpdating
                           }
+                          style={{
+                            ...styles.rejectButton,
+                            ...(isUpdating
+                              ? styles.disabledButton
+                              : {}),
+                          }}
                         >
-                          Mark Contacted
+                          {isUpdating
+                            ? 'Updating...'
+                            : 'Reject'}
                         </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          convertLeadToCompanyForm(
-                            lead,
-                          )
-                        }
-                        style={
-                          styles.convertButton
-                        }
-                      >
-                        Create Company
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateLeadStatus(
-                            lead.id,
-                            {
-                              status:
-                                'rejected',
-                            },
-                          )
-                        }
-                        style={
-                          styles.rejectButton
-                        }
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  </TableCell>
-                </tr>
-              ))}
+                      </div>
+                    </TableCell>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -1823,7 +2148,8 @@ function CreateCompanySection({
 
           <ol style={styles.noticeList}>
             <li>
-              A new customer company is created.
+              A new customer company is created
+              with onboarding status.
             </li>
 
             <li>
@@ -1834,6 +2160,11 @@ function CreateCompanySection({
             <li>
               The administrator receives a secure
               invitation link.
+            </li>
+
+            <li>
+              The company is activated after the
+              invitation is issued successfully.
             </li>
 
             <li>
@@ -1904,7 +2235,19 @@ function CompanyDetailsModal({
   onClose,
   updateCompanyStatus,
   resendAdministratorInvite,
+  resendingCompanyId,
+  updatingCompanyId,
 }) {
+  const resendableInvitation =
+    getLatestResendableAdminInvitation(
+      company,
+    )
+
+  const isResending =
+    resendingCompanyId === company.id
+  const isUpdatingStatus =
+    updatingCompanyId === company.id
+
   return (
     <div
       style={styles.modalOverlay}
@@ -1979,55 +2322,54 @@ function CompanyDetailsModal({
             Company Administrators
           </h3>
 
-          {company.administrators.length === 0 &&
-          company.adminInvitations?.length === 0 ? (
-            <p style={styles.mutedText}>
-              This company does not yet have an
-              administrator or administrator invitation.
-            </p>
-          ) : company.administrators.length > 0 ? (
-            company.administrators.map(
-              (administrator) => (
-                <div
-                  key={administrator.id}
-                  style={
-                    styles.modalUserCard
-                  }
-                >
-                  <div>
-                    <strong>
-                      {getSafeUserName(
-                        administrator,
-                        company.adminInvitations?.find(
-                          (invitation) =>
-                            String(invitation.email || '')
-                              .toLowerCase() ===
-                            String(administrator.email || '')
-                              .toLowerCase(),
-                        ),
-                      )}
-                    </strong>
+          {company.administrators.length >
+          0 ? (
+            <div style={styles.modalUserList}>
+              {company.administrators.map(
+                (administrator) => (
+                  <div
+                    key={administrator.id}
+                    style={
+                      styles.modalUserCard
+                    }
+                  >
+                    <div>
+                      <strong>
+                        {getSafeUserName(
+                          administrator,
+                          getMatchingInvitation(
+                            company.adminInvitations,
+                            administrator.email,
+                          ),
+                        )}
+                      </strong>
 
-                    <div
-                      style={styles.emailText}
-                    >
-                      {administrator.email}
+                      <div
+                        style={
+                          styles.emailText
+                        }
+                      >
+                        {administrator.email}
+                      </div>
                     </div>
-                  </div>
 
-                  <RoleBadge
-                    role={administrator.role}
-                  />
-                </div>
-              ),
-            )
-          ) : (
+                    <RoleBadge
+                      role={administrator.role}
+                    />
+                  </div>
+                ),
+              )}
+            </div>
+          ) : company.adminInvitations
+              ?.length > 0 ? (
             <div style={styles.modalUserList}>
               {company.adminInvitations.map(
                 (invitation) => (
                   <div
                     key={invitation.id}
-                    style={styles.modalUserCard}
+                    style={
+                      styles.modalUserCard
+                    }
                   >
                     <div>
                       <strong>
@@ -2036,18 +2378,30 @@ function CompanyDetailsModal({
                         )}
                       </strong>
 
-                      <div style={styles.emailText}>
+                      <div
+                        style={
+                          styles.emailText
+                        }
+                      >
                         {invitation.email}
                       </div>
                     </div>
 
                     <StatusBadge
-                      status={invitation.status}
+                      status={
+                        invitation.status
+                      }
                     />
                   </div>
                 ),
               )}
             </div>
+          ) : (
+            <p style={styles.mutedText}>
+              This company does not yet have an
+              administrator or administrator
+              invitation.
+            </p>
           )}
         </div>
 
@@ -2074,12 +2428,9 @@ function CompanyDetailsModal({
                       <strong>
                         {getSafeUserName(
                           userProfile,
-                          company.invitations?.find(
-                            (invitation) =>
-                              String(invitation.email || '')
-                                .toLowerCase() ===
-                              String(userProfile.email || '')
-                                .toLowerCase(),
+                          getMatchingInvitation(
+                            company.invitations,
+                            userProfile.email,
                           ),
                         )}
                       </strong>
@@ -2106,20 +2457,29 @@ function CompanyDetailsModal({
         </div>
 
         <div style={styles.modalActions}>
-          {(company.administrators.length > 0 ||
-            company.adminInvitations?.length > 0) && (
-            <button
-              type="button"
-              onClick={() =>
-                resendAdministratorInvite(
-                  company,
-                )
-              }
-              style={styles.inviteButton}
-            >
-              Resend Admin Invitation
-            </button>
-          )}
+          {company.administrators.length ===
+            0 &&
+            resendableInvitation && (
+              <button
+                type="button"
+                onClick={() =>
+                  resendAdministratorInvite(
+                    company,
+                  )
+                }
+                disabled={isResending}
+                style={{
+                  ...styles.inviteButton,
+                  ...(isResending
+                    ? styles.disabledButton
+                    : {}),
+                }}
+              >
+                {isResending
+                  ? 'Resending...'
+                  : 'Resend Admin Invitation'}
+              </button>
+            )}
 
           {normaliseStatus(company.status) !==
             'active' && (
@@ -2131,7 +2491,13 @@ function CompanyDetailsModal({
                   'active',
                 )
               }
-              style={styles.activateButton}
+              disabled={isUpdatingStatus}
+              style={{
+                ...styles.activateButton,
+                ...(isUpdatingStatus
+                  ? styles.disabledButton
+                  : {}),
+              }}
             >
               Activate Company
             </button>
@@ -2147,7 +2513,13 @@ function CompanyDetailsModal({
                   'suspended',
                 )
               }
-              style={styles.suspendButton}
+              disabled={isUpdatingStatus}
+              style={{
+                ...styles.suspendButton,
+                ...(isUpdatingStatus
+                  ? styles.disabledButton
+                  : {}),
+              }}
             >
               Suspend Company
             </button>
@@ -2220,6 +2592,14 @@ function RoleBadge({ role }) {
     roleStyle = styles.roleAdmin
   } else if (value === 'manager') {
     roleStyle = styles.roleManager
+  } else if (
+    value === 'compliance_officer'
+  ) {
+    roleStyle = styles.roleCompliance
+  } else if (value === 'viewer') {
+    roleStyle = styles.roleViewer
+  } else if (value === 'worker') {
+    roleStyle = styles.roleWorker
   }
 
   return (
@@ -2572,6 +2952,11 @@ const styles = {
     overflowWrap: 'anywhere',
   },
 
+  activeAccountText: {
+    color: '#6ee7b7',
+    fontSize: '11px',
+  },
+
   identifierText: {
     maxWidth: '230px',
     marginTop: '5px',
@@ -2691,6 +3076,21 @@ const styles = {
   roleManager: {
     background: '#115e59',
     color: '#ccfbf1',
+  },
+
+  roleCompliance: {
+    background: '#854d0e',
+    color: '#fef3c7',
+  },
+
+  roleViewer: {
+    background: '#3f3f46',
+    color: '#e4e4e7',
+  },
+
+  roleWorker: {
+    background: '#164e63',
+    color: '#cffafe',
   },
 
   roleStaff: {

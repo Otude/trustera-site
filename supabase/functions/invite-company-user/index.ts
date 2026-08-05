@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 
 const allowedOrigins = new Set([
   'https://trust.jemadi.co.uk',
@@ -24,15 +24,25 @@ const companyAdminAssignableRoles = new Set([
 ])
 
 const INVITATION_EXPIRY_DAYS = 7
+const PRODUCTION_REDIRECT_URL =
+  'https://trust.jemadi.co.uk/login'
 
 type InviteRequest = {
   companyId?: string
   email?: string
   fullName?: string
   role?: string
+  resend?: boolean
 }
 
 type JsonBody = Record<string, unknown>
+
+type ExistingInvitation = {
+  id: string
+  status: string | null
+  expires_at: string | null
+  auth_user_id: string | null
+}
 
 function getCorsHeaders(request: Request) {
   const origin = request.headers.get('origin') ?? ''
@@ -78,6 +88,19 @@ function calculateExpiryDate() {
     Date.now() +
       INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000,
   ).toISOString()
+}
+
+function isExpired(value: string | null) {
+  if (!value) {
+    return false
+  }
+
+  const expiryDate = new Date(value)
+
+  return (
+    !Number.isNaN(expiryDate.getTime()) &&
+    expiryDate.getTime() <= Date.now()
+  )
 }
 
 Deno.serve(async (request) => {
@@ -159,39 +182,122 @@ Deno.serve(async (request) => {
   )
 
   let createdInvitationId: string | null = null
-  let invitedAuthUserId: string | null = null
+  let createdAuthUserId: string | null = null
 
-  async function revokeCreatedInvitation() {
-    if (!createdInvitationId) return
+  async function markInvitationRevoked(
+    invitationId: string,
+  ) {
+    const timestamp = new Date().toISOString()
 
     const { error } = await adminClient
       .from('company_invitations')
       .update({
         status: 'revoked',
-        revoked_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        revoked_at: timestamp,
+        updated_at: timestamp,
       })
-      .eq('id', createdInvitationId)
+      .eq('id', invitationId)
 
     if (error) {
       console.error(
-        'Failed to revoke invitation during rollback:',
+        'Failed to revoke invitation:',
         error,
       )
     }
   }
 
-  async function removeCreatedAuthUser() {
-    if (!invitedAuthUserId) return
+  async function markInvitationExpired(
+    invitationId: string,
+  ) {
+    const { error } = await adminClient
+      .from('company_invitations')
+      .update({
+        status: 'expired',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', invitationId)
+      .eq('status', 'pending')
+
+    if (error) {
+      throw error
+    }
+  }
+
+  async function deleteAuthUser(
+    userId: string | null,
+  ) {
+    if (!userId) {
+      return
+    }
 
     const { error } =
-      await adminClient.auth.admin.deleteUser(
-        invitedAuthUserId,
-      )
+      await adminClient.auth.admin.deleteUser(userId)
 
     if (error) {
       console.error(
-        'Failed to remove invited auth user during rollback:',
+        'Failed to delete invited auth user:',
+        error,
+      )
+    }
+  }
+
+  async function rollbackCreatedInvitation() {
+    if (createdAuthUserId) {
+      await deleteAuthUser(createdAuthUserId)
+    }
+
+    if (createdInvitationId) {
+      await markInvitationRevoked(
+        createdInvitationId,
+      )
+    }
+  }
+
+  async function recordAuditLog({
+    companyId,
+    userId,
+    action,
+    invitationId,
+    email,
+    fullName,
+    role,
+    invitedByEmail,
+    previousInvitationId = null,
+  }: {
+    companyId: string
+    userId: string
+    action: string
+    invitationId: string
+    email: string
+    fullName: string
+    role: string
+    invitedByEmail: string | null
+    previousInvitationId?: string | null
+  }) {
+    const { error } = await adminClient
+      .from('audit_logs')
+      .insert({
+        company_id: companyId,
+        user_id: userId,
+        action,
+        entity_type: 'company_invitation',
+        entity_id: invitationId,
+        entity_name: fullName || email,
+        details: {
+          invitation_id: invitationId,
+          previous_invitation_id:
+            previousInvitationId,
+          email,
+          full_name: fullName || null,
+          role,
+          invited_by: userId,
+          invited_by_email: invitedByEmail,
+        },
+      })
+
+    if (error) {
+      console.error(
+        'Invitation succeeded but audit logging failed:',
         error,
       )
     }
@@ -213,14 +319,20 @@ Deno.serve(async (request) => {
       )
     }
 
-    const { data: callerProfile, error: profileError } =
-      await adminClient
-        .from('profiles')
-        .select(
-          'id, company_id, email, full_name, role',
-        )
-        .eq('id', user.id)
-        .maybeSingle()
+    /*
+     * Do not select profiles.updated_at here.
+     * The current profiles table does not contain that column.
+     */
+    const {
+      data: callerProfile,
+      error: profileError,
+    } = await adminClient
+      .from('profiles')
+      .select(
+        'id, company_id, email, full_name, role',
+      )
+      .eq('id', user.id)
+      .maybeSingle()
 
     if (profileError) {
       throw profileError
@@ -241,8 +353,11 @@ Deno.serve(async (request) => {
 
     const isPlatformAdmin = Boolean(platformAdmin)
 
-    const callerRole =
-      callerProfile?.role?.trim().toLowerCase() ?? ''
+    const callerRole = String(
+      callerProfile?.role ?? '',
+    )
+      .trim()
+      .toLowerCase()
 
     const isCompanyAdmin = callerRole === 'admin'
 
@@ -274,6 +389,18 @@ Deno.serve(async (request) => {
     const email = normaliseEmail(body.email)
     const fullName = body.fullName?.trim() ?? ''
     const requestedRole = normaliseRole(body.role)
+    const resend = body.resend === true
+
+    if (!fullName) {
+      return jsonResponse(
+        request,
+        {
+          error:
+            'The team member’s full name is required.',
+        },
+        400,
+      )
+    }
 
     if (!email) {
       return jsonResponse(
@@ -321,7 +448,9 @@ Deno.serve(async (request) => {
 
     if (
       !isPlatformAdmin &&
-      !companyAdminAssignableRoles.has(requestedRole)
+      !companyAdminAssignableRoles.has(
+        requestedRole,
+      )
     ) {
       return jsonResponse(
         request,
@@ -365,12 +494,14 @@ Deno.serve(async (request) => {
       )
     }
 
-    const { data: company, error: companyError } =
-      await adminClient
-        .from('companies')
-        .select('id, name, status')
-        .eq('id', companyId)
-        .maybeSingle()
+    const {
+      data: company,
+      error: companyError,
+    } = await adminClient
+      .from('companies')
+      .select('id, name, status')
+      .eq('id', companyId)
+      .maybeSingle()
 
     if (companyError) {
       throw companyError
@@ -405,6 +536,11 @@ Deno.serve(async (request) => {
       )
     }
 
+    /*
+     * A completed profile means the person already has
+     * Trustera access. No profiles row is created by this
+     * invitation function.
+     */
     const {
       data: existingProfiles,
       error: existingProfileError,
@@ -426,21 +562,28 @@ Deno.serve(async (request) => {
         request,
         {
           error:
-            'A Trustera profile already exists for this email address.',
+            existingProfile.company_id === companyId
+              ? 'This user already belongs to your company.'
+              : 'A Trustera profile already exists for this email address.',
         },
         409,
       )
     }
 
     const {
-      data: pendingInvitations,
+      data: pendingInvitationRows,
       error: pendingInvitationError,
     } = await adminClient
       .from('company_invitations')
-      .select('id, status, expires_at')
+      .select(
+        'id, status, expires_at, auth_user_id',
+      )
       .eq('company_id', companyId)
       .ilike('email', email)
       .eq('status', 'pending')
+      .order('created_at', {
+        ascending: false,
+      })
       .limit(1)
 
     if (pendingInvitationError) {
@@ -448,22 +591,23 @@ Deno.serve(async (request) => {
     }
 
     const existingPendingInvitation =
-      pendingInvitations?.[0] ?? null
+      (pendingInvitationRows?.[0] ??
+        null) as ExistingInvitation | null
+
+    let previousInvitationId: string | null = null
 
     if (existingPendingInvitation) {
-      const expiryDate =
-        existingPendingInvitation.expires_at
-          ? new Date(
-              existingPendingInvitation.expires_at,
-            )
-          : null
+      previousInvitationId =
+        existingPendingInvitation.id
 
-      const isExpired =
-        expiryDate !== null &&
-        !Number.isNaN(expiryDate.getTime()) &&
-        expiryDate.getTime() <= Date.now()
+      const pendingInvitationExpired = isExpired(
+        existingPendingInvitation.expires_at,
+      )
 
-      if (!isExpired) {
+      if (
+        !pendingInvitationExpired &&
+        !resend
+      ) {
         return jsonResponse(
           request,
           {
@@ -474,22 +618,35 @@ Deno.serve(async (request) => {
         )
       }
 
-      const {
-        error: expireOldInvitationError,
-      } = await adminClient
-        .from('company_invitations')
-        .update({
-          status: 'expired',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existingPendingInvitation.id)
+      /*
+       * Resending creates a fresh auth invitation and a fresh
+       * company invitation record. The previous link will no
+       * longer be treated as the current pending invitation.
+       */
+      if (resend) {
+        await markInvitationRevoked(
+          existingPendingInvitation.id,
+        )
+      } else {
+        await markInvitationExpired(
+          existingPendingInvitation.id,
+        )
+      }
 
-      if (expireOldInvitationError) {
-        throw expireOldInvitationError
+      /*
+       * An invitation-generated auth user has no completed
+       * profile yet. Remove it before issuing a replacement
+       * invitation so Supabase can create a fresh invite link.
+       */
+      if (existingPendingInvitation.auth_user_id) {
+        await deleteAuthUser(
+          existingPendingInvitation.auth_user_id,
+        )
       }
     }
 
     const expiresAt = calculateExpiryDate()
+    const invitedAt = new Date().toISOString()
 
     const {
       data: invitation,
@@ -499,10 +656,11 @@ Deno.serve(async (request) => {
       .insert({
         company_id: companyId,
         email,
-        full_name: fullName || null,
+        full_name: fullName,
         role: requestedRole,
         invited_by: user.id,
         status: 'pending',
+        invited_at: invitedAt,
         expires_at: expiresAt,
       })
       .select('id')
@@ -526,8 +684,7 @@ Deno.serve(async (request) => {
       await adminClient.auth.admin.inviteUserByEmail(
         email,
         {
-          redirectTo:
-            'https://trust.jemadi.co.uk/login',
+          redirectTo: PRODUCTION_REDIRECT_URL,
           data: {
             full_name: fullName,
             company_id: companyId,
@@ -541,7 +698,7 @@ Deno.serve(async (request) => {
       )
 
     if (inviteError || !authInvite.user) {
-      await revokeCreatedInvitation()
+      await rollbackCreatedInvitation()
 
       throw (
         inviteError ??
@@ -551,91 +708,54 @@ Deno.serve(async (request) => {
       )
     }
 
-    invitedAuthUserId = authInvite.user.id
+    createdAuthUserId = authInvite.user.id
 
-    const {
-      error: profileInsertError,
-    } = await adminClient
-      .from('profiles')
-      .upsert(
-        {
-          id: invitedAuthUserId,
-          company_id: companyId,
-          email,
-          full_name: fullName || null,
-          role: requestedRole,
-        },
-        {
-          onConflict: 'id',
-        },
-      )
-
-    if (profileInsertError) {
-      await removeCreatedAuthUser()
-      await revokeCreatedInvitation()
-
-      throw profileInsertError
-    }
-
+    /*
+     * Important:
+     * Do not create the profiles row here.
+     *
+     * The accept-company-invitation lifecycle should create
+     * or update the profile only after the recipient signs in
+     * and the invitation has been verified.
+     */
     const {
       error: invitationUpdateError,
     } = await adminClient
       .from('company_invitations')
       .update({
-        auth_user_id: invitedAuthUserId,
+        auth_user_id: createdAuthUserId,
         updated_at: new Date().toISOString(),
       })
       .eq('id', invitation.id)
+      .eq('status', 'pending')
 
     if (invitationUpdateError) {
-      const { error: profileDeleteError } =
-        await adminClient
-          .from('profiles')
-          .delete()
-          .eq('id', invitedAuthUserId)
-
-      if (profileDeleteError) {
-        console.error(
-          'Failed to remove profile during rollback:',
-          profileDeleteError,
-        )
-      }
-
-      await removeCreatedAuthUser()
-      await revokeCreatedInvitation()
-
+      await rollbackCreatedInvitation()
       throw invitationUpdateError
     }
 
-    const { error: auditError } =
-      await adminClient.from('audit_logs').insert({
-        company_id: companyId,
-        user_id: user.id,
-        action: 'team_member_invited',
-        entity_type: 'profile',
-        entity_id: invitedAuthUserId,
-        details: {
-          invitation_id: invitation.id,
-          email,
-          full_name: fullName || null,
-          role: requestedRole,
-          invited_by: user.id,
-          invited_by_email: callerEmail || null,
-        },
-      })
-
-    if (auditError) {
-      console.error(
-        'Invitation succeeded but audit logging failed:',
-        auditError,
-      )
-    }
+    await recordAuditLog({
+      companyId,
+      userId: user.id,
+      action: resend
+        ? 'team_invitation_resent'
+        : 'team_member_invited',
+      invitationId: invitation.id,
+      email,
+      fullName,
+      role: requestedRole,
+      invitedByEmail: callerEmail || null,
+      previousInvitationId,
+    })
 
     return jsonResponse(request, {
       success: true,
-      message: `Invitation sent to ${email}.`,
+      resent: resend,
+      message: resend
+        ? `Invitation resent to ${email}.`
+        : `Invitation sent to ${email}.`,
       invitationId: invitation.id,
-      invitedUserId: invitedAuthUserId,
+      invitedUserId: createdAuthUserId,
       expiresAt,
     })
   } catch (error) {

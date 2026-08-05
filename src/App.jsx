@@ -79,6 +79,40 @@ function resolveProfileName(profileData, user) {
   )
 }
 
+async function readFunctionError(error, fallbackMessage) {
+  let message =
+    error?.message ||
+    fallbackMessage
+
+  const context = error?.context
+
+  if (!context) {
+    return message
+  }
+
+  try {
+    const body = await context.clone().json()
+
+    if (body?.error) {
+      message = body.error
+    } else if (body?.message) {
+      message = body.message
+    }
+  } catch {
+    try {
+      const text = await context.clone().text()
+
+      if (text) {
+        message = text
+      }
+    } catch {
+      // Keep the original function error.
+    }
+  }
+
+  return message
+}
+
 export default function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -96,40 +130,36 @@ export default function App() {
   ] = useState('')
 
   /*
-   * Remains available across renders and records
-   * whether App is still mounted.
-   *
-   * This prevents delayed authentication/database
-   * requests from trying to update state after the
-   * component has unmounted.
+   * Tracks whether App is still mounted so delayed
+   * asynchronous operations cannot update state after
+   * unmounting.
    */
   const mountedRef = useRef(false)
 
   /*
-   * Every access-context request receives a unique
-   * sequence number.
-   *
-   * Only the most recent request is allowed to update
-   * profile state. This prevents an older Supabase auth
-   * event from overwriting a newer session.
+   * Each access-context request receives a sequence ID.
+   * Only the newest request may update React state.
    */
   const accessRequestIdRef = useRef(0)
 
   /*
-   * Stores the timeout created inside
-   * onAuthStateChange so that it can be cancelled
-   * during cleanup or before scheduling another one.
+   * Stores the deferred authentication callback created
+   * by onAuthStateChange.
    */
   const authTimeoutRef = useRef(null)
 
   /*
-   * Stores the latest authenticated user ID.
-   *
-   * This provides an additional safeguard against
-   * applying profile information belonging to a user
-   * who is no longer the active session.
+   * Stores the ID of the user belonging to the current
+   * authenticated session.
    */
   const activeUserIdRef = useRef(null)
+
+  /*
+   * Prevents the invitation acceptance function from
+   * being called repeatedly for token refresh events
+   * during the same browser session.
+   */
+  const invitationAttemptedForUserRef = useRef(null)
 
   const clearScheduledAuthTimeout = useCallback(() => {
     if (authTimeoutRef.current !== null) {
@@ -139,11 +169,9 @@ export default function App() {
   }, [])
 
   const clearAccessState = useCallback(() => {
-    /*
-     * Invalidate any currently running access request.
-     */
     accessRequestIdRef.current += 1
     activeUserIdRef.current = null
+    invitationAttemptedForUserRef.current = null
 
     if (!mountedRef.current) return
 
@@ -152,33 +180,129 @@ export default function App() {
     setProfileError('')
   }, [])
 
-  const markInvitationAsAccepted = useCallback(
-    async (userId) => {
-      if (!userId) return
+  /*
+   * Invitation acceptance must be completed by the
+   * authenticated Edge Function.
+   *
+   * App.jsx must not directly update company_invitations
+   * because the acceptance process also needs to verify
+   * the invitation and create or synchronise the profile.
+   */
+  const acceptPendingInvitation = useCallback(
+    async (user) => {
+      if (!user?.id) {
+        return {
+          attempted: false,
+          accepted: false,
+        }
+      }
 
-      const acceptedAt = new Date().toISOString()
+      if (
+        invitationAttemptedForUserRef.current ===
+        user.id
+      ) {
+        return {
+          attempted: false,
+          accepted: false,
+        }
+      }
 
-      const { error } = await supabase
-        .from('company_invitations')
-        .update({
-          status: 'accepted',
-          auth_user_id: userId,
-          accepted_at: acceptedAt,
-          updated_at: acceptedAt,
-        })
-        .eq('auth_user_id', userId)
-        .eq('status', 'pending')
+      invitationAttemptedForUserRef.current = user.id
 
-      if (error) {
+      const invitationId = String(
+        user.user_metadata?.invitation_id || '',
+      ).trim()
+
+      const companyId = String(
+        user.user_metadata?.company_id || '',
+      ).trim()
+
+      /*
+       * A normal existing user does not need the
+       * invitation function.
+       */
+      if (!invitationId && !companyId) {
+        return {
+          attempted: false,
+          accepted: false,
+        }
+      }
+
+      try {
+        const { data, error } =
+          await supabase.functions.invoke(
+            'accept-company-invitation',
+            {
+              body: invitationId
+                ? {
+                    invitationId,
+                  }
+                : {},
+            },
+          )
+
+        if (error) {
+          throw new Error(
+            await readFunctionError(
+              error,
+              'The company invitation could not be accepted.',
+            ),
+          )
+        }
+
+        if (data?.error) {
+          throw new Error(data.error)
+        }
+
+        return {
+          attempted: true,
+          accepted: Boolean(
+            data?.accepted ??
+              data?.success,
+          ),
+          data,
+        }
+      } catch (error) {
         /*
-         * Invitation acceptance must not block
-         * an otherwise valid user from signing in.
+         * Allow access-context loading to continue.
+         *
+         * Existing users may have invitation metadata
+         * left in auth even though their invitation was
+         * already accepted.
          */
         console.error(
-          'Unable to mark invitation as accepted:',
+          'Invitation acceptance failed:',
           error,
         )
+
+        return {
+          attempted: true,
+          accepted: false,
+          error,
+        }
       }
+    },
+    [],
+  )
+
+  const fetchProfileRecord = useCallback(
+    async (userId) => {
+      return supabase
+        .from('profiles')
+        .select(PROFILE_FIELDS)
+        .eq('id', userId)
+        .maybeSingle()
+    },
+    [],
+  )
+
+  const fetchPlatformAdminRecord = useCallback(
+    async (userId) => {
+      return supabase
+        .from('platform_admins')
+        .select('user_id')
+        .eq('user_id', userId)
+        .maybeSingle()
     },
     [],
   )
@@ -198,10 +322,6 @@ export default function App() {
         return null
       }
 
-      /*
-       * Start a new request and remember the user for
-       * whom the request was created.
-       */
       const requestId =
         accessRequestIdRef.current + 1
 
@@ -221,34 +341,16 @@ export default function App() {
           setProfileError('')
         }
 
-        const [
-          profileResponse,
-          platformAdminResponse,
-        ] = await Promise.all([
-          supabase
-            .from('profiles')
-            .select(PROFILE_FIELDS)
-            .eq('id', user.id)
-            .maybeSingle(),
-
-          supabase
-            .from('platform_admins')
-            .select('user_id')
-            .eq('user_id', user.id)
-            .maybeSingle(),
-        ])
-
         /*
-         * Another authentication request may have
-         * started while the database queries were
-         * running.
+         * Check platform access first. A platform
+         * administrator may legitimately have no company
+         * profile.
          */
+        const platformAdminResponse =
+          await fetchPlatformAdminRecord(user.id)
+
         if (!requestIsCurrent()) {
           return null
-        }
-
-        if (profileResponse.error) {
-          throw profileResponse.error
         }
 
         if (platformAdminResponse.error) {
@@ -259,28 +361,66 @@ export default function App() {
           platformAdminResponse.data?.user_id,
         )
 
-        const profileData =
+        /*
+         * Read the profile before running invitation
+         * acceptance. Existing users should not make an
+         * unnecessary Edge Function request.
+         */
+        let profileResponse =
+          await fetchProfileRecord(user.id)
+
+        if (!requestIsCurrent()) {
+          return null
+        }
+
+        if (profileResponse.error) {
+          throw profileResponse.error
+        }
+
+        let profileData =
           profileResponse.data || null
 
         /*
-         * A user must have either:
-         *
-         * 1. A company profile, or
-         * 2. A record in platform_admins.
+         * An invited user may not have a profile until
+         * accept-company-invitation verifies the pending
+         * invitation and creates it.
          */
         if (!profileData && !platformAdmin) {
+          const acceptanceResult =
+            await acceptPendingInvitation(user)
+
+          if (!requestIsCurrent()) {
+            return null
+          }
+
+          /*
+           * Whether the function reported a new acceptance
+           * or an idempotent already-accepted result, query
+           * the profile again.
+           */
+          if (acceptanceResult.attempted) {
+            profileResponse =
+              await fetchProfileRecord(user.id)
+
+            if (!requestIsCurrent()) {
+              return null
+            }
+
+            if (profileResponse.error) {
+              throw profileResponse.error
+            }
+
+            profileData =
+              profileResponse.data || null
+          }
+        }
+
+        if (!profileData && !platformAdmin) {
           throw new Error(
-            'Your Trustera user profile could not be found. Contact your organisation administrator.',
+            'Your Trustera user profile could not be found. The invitation may be invalid, expired or not yet completed. Contact your organisation administrator.',
           )
         }
 
-        /*
-         * Normal company users use their profile
-         * record.
-         *
-         * A platform administrator can still sign
-         * in even if no company profile exists.
-         */
         const normalisedProfile = profileData
           ? {
               ...profileData,
@@ -320,13 +460,6 @@ export default function App() {
               is_platform_admin: true,
             }
 
-        /*
-         * Ordinary company users must belong to
-         * a company.
-         *
-         * Platform administrators are allowed to
-         * exist without a company assignment.
-         */
         if (
           !normalisedProfile.company_id &&
           !platformAdmin
@@ -336,40 +469,12 @@ export default function App() {
           )
         }
 
-        /*
-         * Once authentication and access validation
-         * succeed, mark any matching pending
-         * invitation as accepted.
-         *
-         * This operation is intentionally
-         * non-blocking for authentication.
-         */
-        try {
-          await markInvitationAsAccepted(
-            user.id,
-          )
-        } catch (invitationError) {
-          console.error(
-            'Invitation lifecycle update failed:',
-            invitationError,
-          )
-        }
-
-        /*
-         * Recheck after the invitation operation
-         * because the active session may have changed
-         * while it was running.
-         */
         if (!requestIsCurrent()) {
           return null
         }
 
         setProfile(normalisedProfile)
-
-        setIsPlatformAdmin(
-          platformAdmin,
-        )
-
+        setIsPlatformAdmin(platformAdmin)
         setProfileError('')
 
         return {
@@ -382,10 +487,6 @@ export default function App() {
           error,
         )
 
-        /*
-         * Do not show an error from an obsolete
-         * authentication request.
-         */
         if (!requestIsCurrent()) {
           return null
         }
@@ -401,7 +502,11 @@ export default function App() {
         return null
       }
     },
-    [markInvitationAsAccepted],
+    [
+      acceptPendingInvitation,
+      fetchPlatformAdminRecord,
+      fetchProfileRecord,
+    ],
   )
 
   useEffect(() => {
@@ -449,6 +554,7 @@ export default function App() {
 
         accessRequestIdRef.current += 1
         activeUserIdRef.current = null
+        invitationAttemptedForUserRef.current = null
 
         setSession(null)
         setProfile(null)
@@ -471,91 +577,103 @@ export default function App() {
       data: { subscription },
     } =
       supabase.auth.onAuthStateChange(
-        (_event, updatedSession) => {
+        (event, updatedSession) => {
           if (!mountedRef.current) {
             return
           }
 
-          /*
-           * Cancel an earlier deferred callback before
-           * scheduling a new one.
-           */
           clearScheduledAuthTimeout()
 
           /*
-           * Invalidate any access request created by
-           * an earlier authentication event.
+           * A signed-out event invalidates every unresolved
+           * access request immediately.
            */
-          accessRequestIdRef.current += 1
-
-          setSession(updatedSession)
-
-          if (updatedSession?.user) {
-            activeUserIdRef.current =
-              updatedSession.user.id
-
-            setLoading(true)
-            setProfileError('')
-
-            /*
-             * Defer database queries until Supabase
-             * completes its internal authentication
-             * state processing.
-             */
-            authTimeoutRef.current =
-              window.setTimeout(
-                async () => {
-                  authTimeoutRef.current = null
-
-                  if (!mountedRef.current) {
-                    return
-                  }
-
-                  const expectedUserId =
-                    updatedSession.user.id
-
-                  /*
-                   * Do not load the profile if another
-                   * auth event has already replaced this
-                   * user.
-                   */
-                  if (
-                    activeUserIdRef.current !==
-                    expectedUserId
-                  ) {
-                    return
-                  }
-
-                  await fetchAccessContext(
-                    updatedSession.user,
-                  )
-
-                  if (
-                    mountedRef.current &&
-                    activeUserIdRef.current ===
-                      expectedUserId
-                  ) {
-                    setLoading(false)
-                  }
-                },
-                0,
-              )
-          } else {
-            activeUserIdRef.current = null
+          if (
+            event === 'SIGNED_OUT' ||
+            !updatedSession?.user
+          ) {
+            setSession(null)
             clearAccessState()
             setLoading(false)
+            return
           }
+
+          const previousUserId =
+            activeUserIdRef.current
+
+          const nextUserId =
+            updatedSession.user.id
+
+          /*
+           * Reset invitation processing when a different
+           * user signs in.
+           */
+          if (
+            previousUserId &&
+            previousUserId !== nextUserId
+          ) {
+            invitationAttemptedForUserRef.current =
+              null
+          }
+
+          accessRequestIdRef.current += 1
+          activeUserIdRef.current = nextUserId
+
+          setSession(updatedSession)
+          setProfileError('')
+
+          /*
+           * TOKEN_REFRESHED and USER_UPDATED events should
+           * not blank an already-loaded screen.
+           */
+          const shouldShowLoading =
+            event === 'SIGNED_IN' ||
+            event === 'INITIAL_SESSION' ||
+            !profile
+
+          if (shouldShowLoading) {
+            setLoading(true)
+          }
+
+          authTimeoutRef.current =
+            window.setTimeout(
+              async () => {
+                authTimeoutRef.current = null
+
+                if (!mountedRef.current) {
+                  return
+                }
+
+                if (
+                  activeUserIdRef.current !==
+                  nextUserId
+                ) {
+                  return
+                }
+
+                await fetchAccessContext(
+                  updatedSession.user,
+                )
+
+                if (
+                  mountedRef.current &&
+                  activeUserIdRef.current ===
+                    nextUserId
+                ) {
+                  setLoading(false)
+                }
+              },
+              0,
+            )
         },
       )
 
     return () => {
       mountedRef.current = false
 
-      /*
-       * Invalidate all unresolved profile requests.
-       */
       accessRequestIdRef.current += 1
       activeUserIdRef.current = null
+      invitationAttemptedForUserRef.current = null
 
       clearScheduledAuthTimeout()
       subscription.unsubscribe()
@@ -564,6 +682,7 @@ export default function App() {
     clearAccessState,
     clearScheduledAuthTimeout,
     fetchAccessContext,
+    profile,
   ])
 
   if (loading) {
@@ -674,14 +793,6 @@ function AuthenticatedApp({
     hasCompany &&
     can(profile, 'viewNotifications')
 
-  /*
-   * A platform administrator without a company
-   * opens the platform administration page.
-   *
-   * A platform administrator who also belongs to
-   * a company opens the company dashboard by
-   * default but may still visit /platform-admin.
-   */
   const defaultAuthenticatedRoute =
     isPlatformAdmin && !hasCompany
       ? '/platform-admin'
