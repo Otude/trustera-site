@@ -79,7 +79,10 @@ function resolveProfileName(profileData, user) {
   )
 }
 
-async function readFunctionError(error, fallbackMessage) {
+async function readFunctionError(
+  error,
+  fallbackMessage,
+) {
   let message =
     error?.message ||
     fallbackMessage
@@ -91,7 +94,8 @@ async function readFunctionError(error, fallbackMessage) {
   }
 
   try {
-    const body = await context.clone().json()
+    const body =
+      await context.clone().json()
 
     if (body?.error) {
       message = body.error
@@ -100,29 +104,89 @@ async function readFunctionError(error, fallbackMessage) {
     }
   } catch {
     try {
-      const text = await context.clone().text()
+      const text =
+        await context.clone().text()
 
       if (text) {
         message = text
       }
     } catch {
-      // Keep the original function error.
+      // Preserve the original function error.
     }
   }
 
   return message
 }
 
+function sessionsMatch(
+  previousSession,
+  nextSession,
+) {
+  if (previousSession === nextSession) {
+    return true
+  }
+
+  if (!previousSession && !nextSession) {
+    return true
+  }
+
+  if (!previousSession || !nextSession) {
+    return false
+  }
+
+  return (
+    previousSession.user?.id ===
+      nextSession.user?.id &&
+    previousSession.access_token ===
+      nextSession.access_token &&
+    previousSession.expires_at ===
+      nextSession.expires_at
+  )
+}
+
+function profilesMatch(
+  previousProfile,
+  nextProfile,
+) {
+  if (previousProfile === nextProfile) {
+    return true
+  }
+
+  if (!previousProfile || !nextProfile) {
+    return false
+  }
+
+  return (
+    previousProfile.id === nextProfile.id &&
+    previousProfile.company_id ===
+      nextProfile.company_id &&
+    previousProfile.email ===
+      nextProfile.email &&
+    previousProfile.full_name ===
+      nextProfile.full_name &&
+    previousProfile.role ===
+      nextProfile.role &&
+    previousProfile.created_at ===
+      nextProfile.created_at &&
+    previousProfile.is_platform_admin ===
+      nextProfile.is_platform_admin
+  )
+}
+
 export default function App() {
-  const [session, setSession] = useState(null)
-  const [profile, setProfile] = useState(null)
+  const [session, setSession] =
+    useState(null)
+
+  const [profile, setProfile] =
+    useState(null)
 
   const [
     isPlatformAdmin,
     setIsPlatformAdmin,
   ] = useState(false)
 
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] =
+    useState(true)
 
   const [
     profileError,
@@ -130,66 +194,114 @@ export default function App() {
   ] = useState('')
 
   /*
-   * Tracks whether App is still mounted so delayed
-   * asynchronous operations cannot update state after
-   * unmounting.
+   * Tracks whether App remains mounted.
    */
   const mountedRef = useRef(false)
 
   /*
-   * Each access-context request receives a sequence ID.
-   * Only the newest request may update React state.
+   * Only the newest access-context request may
+   * update React state.
    */
   const accessRequestIdRef = useRef(0)
 
   /*
-   * Stores the deferred authentication callback created
-   * by onAuthStateChange.
-   */
-  const authTimeoutRef = useRef(null)
-
-  /*
-   * Stores the ID of the user belonging to the current
-   * authenticated session.
+   * Stores the current authenticated user ID.
    */
   const activeUserIdRef = useRef(null)
 
   /*
-   * Prevents the invitation acceptance function from
-   * being called repeatedly for token refresh events
-   * during the same browser session.
+   * Stores the user whose access context is already
+   * loaded.
    */
-  const invitationAttemptedForUserRef = useRef(null)
-
-  const clearScheduledAuthTimeout = useCallback(() => {
-    if (authTimeoutRef.current !== null) {
-      window.clearTimeout(authTimeoutRef.current)
-      authTimeoutRef.current = null
-    }
-  }, [])
-
-  const clearAccessState = useCallback(() => {
-    accessRequestIdRef.current += 1
-    activeUserIdRef.current = null
-    invitationAttemptedForUserRef.current = null
-
-    if (!mountedRef.current) return
-
-    setProfile(null)
-    setIsPlatformAdmin(false)
-    setProfileError('')
-  }, [])
+  const loadedAccessUserIdRef = useRef(null)
 
   /*
-   * Invitation acceptance must be completed by the
+   * Stores the user whose access context is currently
+   * being requested.
+   */
+  const loadingAccessUserIdRef = useRef(null)
+
+  /*
+   * Stores the deferred authentication callback.
+   */
+  const authTimeoutRef = useRef(null)
+
+  /*
+   * Prevents repeated invitation acceptance requests
+   * for the same authenticated user.
+   */
+  const invitationAttemptedForUserRef =
+    useRef(null)
+
+  /*
+   * Indicates that the initial getSession request has
+   * completed.
+   */
+  const initialAuthCompletedRef =
+    useRef(false)
+
+  const updateSessionState = useCallback(
+    (nextSession) => {
+      if (!mountedRef.current) return
+
+      setSession((previousSession) =>
+        sessionsMatch(
+          previousSession,
+          nextSession,
+        )
+          ? previousSession
+          : nextSession,
+      )
+    },
+    [],
+  )
+
+  const clearScheduledAuthTimeout =
+    useCallback(() => {
+      if (
+        authTimeoutRef.current !== null
+      ) {
+        window.clearTimeout(
+          authTimeoutRef.current,
+        )
+
+        authTimeoutRef.current = null
+      }
+    }, [])
+
+  const clearAccessState = useCallback(
+    ({ clearError = true } = {}) => {
+      accessRequestIdRef.current += 1
+
+      activeUserIdRef.current = null
+      loadedAccessUserIdRef.current = null
+      loadingAccessUserIdRef.current = null
+
+      invitationAttemptedForUserRef.current =
+        null
+
+      if (!mountedRef.current) return
+
+      setProfile(null)
+      setIsPlatformAdmin(false)
+
+      if (clearError) {
+        setProfileError('')
+      }
+    },
+    [],
+  )
+
+  /*
+   * Invitation acceptance is completed by the
    * authenticated Edge Function.
    *
-   * App.jsx must not directly update company_invitations
-   * because the acceptance process also needs to verify
-   * the invitation and create or synchronise the profile.
+   * The browser must not update company_invitations
+   * directly because the Edge Function also verifies
+   * company membership, role and invitation ownership.
    */
-  const acceptPendingInvitation = useCallback(
-    async (user) => {
+  const acceptPendingInvitation =
+    useCallback(async (user) => {
       if (!user?.id) {
         return {
           attempted: false,
@@ -207,19 +319,19 @@ export default function App() {
         }
       }
 
-      invitationAttemptedForUserRef.current = user.id
-
       const invitationId = String(
-        user.user_metadata?.invitation_id || '',
+        user.user_metadata?.invitation_id ||
+          '',
       ).trim()
 
       const companyId = String(
-        user.user_metadata?.company_id || '',
+        user.user_metadata?.company_id ||
+          '',
       ).trim()
 
       /*
-       * A normal existing user does not need the
-       * invitation function.
+       * Existing users with no invitation metadata
+       * do not need to invoke the acceptance function.
        */
       if (!invitationId && !companyId) {
         return {
@@ -227,6 +339,9 @@ export default function App() {
           accepted: false,
         }
       }
+
+      invitationAttemptedForUserRef.current =
+        user.id
 
       try {
         const { data, error } =
@@ -256,20 +371,21 @@ export default function App() {
 
         return {
           attempted: true,
+
           accepted: Boolean(
             data?.accepted ??
               data?.success,
           ),
+
           data,
         }
       } catch (error) {
         /*
-         * Allow access-context loading to continue.
-         *
-         * Existing users may have invitation metadata
-         * left in auth even though their invitation was
-         * already accepted.
+         * Permit a future genuine sign-in event to retry.
          */
+        invitationAttemptedForUserRef.current =
+          null
+
         console.error(
           'Invitation acceptance failed:',
           error,
@@ -281,34 +397,34 @@ export default function App() {
           error,
         }
       }
-    },
-    [],
-  )
+    }, [])
 
-  const fetchProfileRecord = useCallback(
-    async (userId) => {
+  const fetchProfileRecord =
+    useCallback(async (userId) => {
       return supabase
         .from('profiles')
         .select(PROFILE_FIELDS)
         .eq('id', userId)
         .maybeSingle()
-    },
-    [],
-  )
+    }, [])
 
-  const fetchPlatformAdminRecord = useCallback(
-    async (userId) => {
+  const fetchPlatformAdminRecord =
+    useCallback(async (userId) => {
       return supabase
         .from('platform_admins')
         .select('user_id')
         .eq('user_id', userId)
         .maybeSingle()
-    },
-    [],
-  )
+    }, [])
 
   const fetchAccessContext = useCallback(
-    async (user) => {
+    async (
+      user,
+      {
+        showFullScreenLoader = false,
+        synchroniseInvitation = true,
+      } = {},
+    ) => {
       if (!user?.id) {
         if (mountedRef.current) {
           setProfile(null)
@@ -322,18 +438,46 @@ export default function App() {
         return null
       }
 
+      const userId = user.id
+
+      /*
+       * Prevent a duplicate request for the same user
+       * while one is already running.
+       */
+      if (
+        loadingAccessUserIdRef.current ===
+        userId
+      ) {
+        return null
+      }
+
       const requestId =
         accessRequestIdRef.current + 1
 
-      accessRequestIdRef.current = requestId
-      activeUserIdRef.current = user.id
+      accessRequestIdRef.current =
+        requestId
+
+      activeUserIdRef.current =
+        userId
+
+      loadingAccessUserIdRef.current =
+        userId
 
       function requestIsCurrent() {
         return (
           mountedRef.current &&
-          accessRequestIdRef.current === requestId &&
-          activeUserIdRef.current === user.id
+          accessRequestIdRef.current ===
+            requestId &&
+          activeUserIdRef.current ===
+            userId
         )
+      }
+
+      if (
+        showFullScreenLoader &&
+        mountedRef.current
+      ) {
+        setLoading(true)
       }
 
       try {
@@ -342,32 +486,38 @@ export default function App() {
         }
 
         /*
-         * Check platform access first. A platform
-         * administrator may legitimately have no company
-         * profile.
+         * Platform administrators may legitimately
+         * exist without a company profile.
          */
         const platformAdminResponse =
-          await fetchPlatformAdminRecord(user.id)
+          await fetchPlatformAdminRecord(
+            userId,
+          )
 
         if (!requestIsCurrent()) {
           return null
         }
 
-        if (platformAdminResponse.error) {
+        if (
+          platformAdminResponse.error
+        ) {
           throw platformAdminResponse.error
         }
 
         const platformAdmin = Boolean(
-          platformAdminResponse.data?.user_id,
+          platformAdminResponse.data
+            ?.user_id,
         )
 
         /*
-         * Read the profile before running invitation
-         * acceptance. Existing users should not make an
-         * unnecessary Edge Function request.
+         * Read the profile before attempting invitation
+         * acceptance. Existing users should not invoke
+         * the Edge Function unnecessarily.
          */
         let profileResponse =
-          await fetchProfileRecord(user.id)
+          await fetchProfileRecord(
+            userId,
+          )
 
         if (!requestIsCurrent()) {
           return null
@@ -382,31 +532,43 @@ export default function App() {
 
         /*
          * An invited user may not have a profile until
-         * accept-company-invitation verifies the pending
-         * invitation and creates it.
+         * the invitation Edge Function creates or
+         * synchronises it.
          */
-        if (!profileData && !platformAdmin) {
+        if (
+          !profileData &&
+          !platformAdmin &&
+          synchroniseInvitation
+        ) {
           const acceptanceResult =
-            await acceptPendingInvitation(user)
+            await acceptPendingInvitation(
+              user,
+            )
 
           if (!requestIsCurrent()) {
             return null
           }
 
           /*
-           * Whether the function reported a new acceptance
-           * or an idempotent already-accepted result, query
-           * the profile again.
+           * Query the profile again after either a new
+           * acceptance or an idempotent acceptance
+           * response.
            */
-          if (acceptanceResult.attempted) {
+          if (
+            acceptanceResult.attempted
+          ) {
             profileResponse =
-              await fetchProfileRecord(user.id)
+              await fetchProfileRecord(
+                userId,
+              )
 
             if (!requestIsCurrent()) {
               return null
             }
 
-            if (profileResponse.error) {
+            if (
+              profileResponse.error
+            ) {
               throw profileResponse.error
             }
 
@@ -415,50 +577,56 @@ export default function App() {
           }
         }
 
-        if (!profileData && !platformAdmin) {
+        if (
+          !profileData &&
+          !platformAdmin
+        ) {
           throw new Error(
             'Your Trustera user profile could not be found. The invitation may be invalid, expired or not yet completed. Contact your organisation administrator.',
           )
         }
 
-        const normalisedProfile = profileData
-          ? {
-              ...profileData,
+        const normalisedProfile =
+          profileData
+            ? {
+                ...profileData,
 
-              email:
-                profileData.email ||
-                user.email ||
-                '',
+                email:
+                  profileData.email ||
+                  user.email ||
+                  '',
 
-              full_name: resolveProfileName(
-                profileData,
-                user,
-              ),
+                full_name:
+                  resolveProfileName(
+                    profileData,
+                    user,
+                  ),
 
-              role: normaliseRole(
-                profileData.role,
-              ),
+                role: normaliseRole(
+                  profileData.role,
+                ),
 
-              is_platform_admin:
-                platformAdmin,
-            }
-          : {
-              id: user.id,
-              company_id: null,
-              email: user.email || '',
+                is_platform_admin:
+                  platformAdmin,
+              }
+            : {
+                id: userId,
+                company_id: null,
+                email: user.email || '',
 
-              full_name: resolveProfileName(
-                null,
-                user,
-              ),
+                full_name:
+                  resolveProfileName(
+                    null,
+                    user,
+                  ),
 
-              role: 'platform_admin',
+                role: 'platform_admin',
 
-              created_at:
-                user.created_at || null,
+                created_at:
+                  user.created_at || null,
 
-              is_platform_admin: true,
-            }
+                is_platform_admin: true,
+              }
 
         if (
           !normalisedProfile.company_id &&
@@ -473,13 +641,33 @@ export default function App() {
           return null
         }
 
-        setProfile(normalisedProfile)
-        setIsPlatformAdmin(platformAdmin)
+        loadedAccessUserIdRef.current =
+          userId
+
+        setProfile(
+          (previousProfile) =>
+            profilesMatch(
+              previousProfile,
+              normalisedProfile,
+            )
+              ? previousProfile
+              : normalisedProfile,
+        )
+
+        setIsPlatformAdmin(
+          (previousValue) =>
+            previousValue ===
+            platformAdmin
+              ? previousValue
+              : platformAdmin,
+        )
+
         setProfileError('')
 
         return {
           profile: normalisedProfile,
-          isPlatformAdmin: platformAdmin,
+          isPlatformAdmin:
+            platformAdmin,
         }
       } catch (error) {
         console.error(
@@ -491,6 +679,9 @@ export default function App() {
           return null
         }
 
+        loadedAccessUserIdRef.current =
+          null
+
         setProfile(null)
         setIsPlatformAdmin(false)
 
@@ -500,6 +691,21 @@ export default function App() {
         )
 
         return null
+      } finally {
+        if (
+          loadingAccessUserIdRef.current ===
+          userId
+        ) {
+          loadingAccessUserIdRef.current =
+            null
+        }
+
+        if (
+          requestIsCurrent() &&
+          showFullScreenLoader
+        ) {
+          setLoading(false)
+        }
       }
     },
     [
@@ -508,6 +714,56 @@ export default function App() {
       fetchProfileRecord,
     ],
   )
+
+  const scheduleAccessContextLoad =
+    useCallback(
+      (
+        user,
+        {
+          showFullScreenLoader = false,
+          synchroniseInvitation = true,
+        } = {},
+      ) => {
+        if (!user?.id) return
+
+        clearScheduledAuthTimeout()
+
+        const expectedUserId =
+          user.id
+
+        authTimeoutRef.current =
+          window.setTimeout(
+            async () => {
+              authTimeoutRef.current =
+                null
+
+              if (!mountedRef.current) {
+                return
+              }
+
+              if (
+                activeUserIdRef.current !==
+                expectedUserId
+              ) {
+                return
+              }
+
+              await fetchAccessContext(
+                user,
+                {
+                  showFullScreenLoader,
+                  synchroniseInvitation,
+                },
+              )
+            },
+            0,
+          )
+      },
+      [
+        clearScheduledAuthTimeout,
+        fetchAccessContext,
+      ],
+    )
 
   useEffect(() => {
     mountedRef.current = true
@@ -530,14 +786,26 @@ export default function App() {
           return
         }
 
-        setSession(currentSession)
+        updateSessionState(
+          currentSession,
+        )
 
         if (currentSession?.user) {
-          activeUserIdRef.current =
+          const userId =
             currentSession.user.id
+
+          activeUserIdRef.current =
+            userId
 
           await fetchAccessContext(
             currentSession.user,
+            {
+              showFullScreenLoader:
+                false,
+
+              synchroniseInvitation:
+                true,
+            },
           )
         } else {
           clearAccessState()
@@ -553,8 +821,16 @@ export default function App() {
         }
 
         accessRequestIdRef.current += 1
+
         activeUserIdRef.current = null
-        invitationAttemptedForUserRef.current = null
+        loadedAccessUserIdRef.current =
+          null
+
+        loadingAccessUserIdRef.current =
+          null
+
+        invitationAttemptedForUserRef.current =
+          null
 
         setSession(null)
         setProfile(null)
@@ -565,13 +841,14 @@ export default function App() {
             'Unable to initialise your Trustera session.',
         )
       } finally {
+        initialAuthCompletedRef.current =
+          true
+
         if (mountedRef.current) {
           setLoading(false)
         }
       }
     }
-
-    initialiseAuth()
 
     const {
       data: { subscription },
@@ -582,98 +859,168 @@ export default function App() {
             return
           }
 
-          clearScheduledAuthTimeout()
+          updateSessionState(
+            updatedSession,
+          )
 
-          /*
-           * A signed-out event invalidates every unresolved
-           * access request immediately.
-           */
           if (
             event === 'SIGNED_OUT' ||
             !updatedSession?.user
           ) {
-            setSession(null)
+            clearScheduledAuthTimeout()
             clearAccessState()
             setLoading(false)
             return
           }
 
+          const user =
+            updatedSession.user
+
+          const nextUserId =
+            user.id
+
           const previousUserId =
             activeUserIdRef.current
 
-          const nextUserId =
-            updatedSession.user.id
+          const userChanged =
+            Boolean(previousUserId) &&
+            previousUserId !==
+              nextUserId
 
-          /*
-           * Reset invitation processing when a different
-           * user signs in.
-           */
-          if (
-            previousUserId &&
-            previousUserId !== nextUserId
-          ) {
+          if (userChanged) {
+            accessRequestIdRef.current +=
+              1
+
+            loadedAccessUserIdRef.current =
+              null
+
+            loadingAccessUserIdRef.current =
+              null
+
             invitationAttemptedForUserRef.current =
               null
           }
 
-          accessRequestIdRef.current += 1
-          activeUserIdRef.current = nextUserId
-
-          setSession(updatedSession)
-          setProfileError('')
+          activeUserIdRef.current =
+            nextUserId
 
           /*
-           * TOKEN_REFRESHED and USER_UPDATED events should
-           * not blank an already-loaded screen.
+           * Token refresh events only update the token.
+           * They must not reload the profile or replace
+           * the current page with a loader.
            */
-          const shouldShowLoading =
-            event === 'SIGNED_IN' ||
-            event === 'INITIAL_SESSION' ||
-            !profile
-
-          if (shouldShowLoading) {
-            setLoading(true)
+          if (
+            event ===
+            'TOKEN_REFRESHED'
+          ) {
+            return
           }
 
-          authTimeoutRef.current =
-            window.setTimeout(
-              async () => {
-                authTimeoutRef.current = null
-
-                if (!mountedRef.current) {
-                  return
-                }
-
-                if (
-                  activeUserIdRef.current !==
-                  nextUserId
-                ) {
-                  return
-                }
-
-                await fetchAccessContext(
-                  updatedSession.user,
-                )
-
-                if (
-                  mountedRef.current &&
-                  activeUserIdRef.current ===
-                    nextUserId
-                ) {
-                  setLoading(false)
-                }
-              },
-              0,
+          /*
+           * getSession frequently overlaps with
+           * INITIAL_SESSION.
+           */
+          if (
+            event ===
+              'INITIAL_SESSION' &&
+            (
+              loadedAccessUserIdRef.current ===
+                nextUserId ||
+              loadingAccessUserIdRef.current ===
+                nextUserId
             )
+          ) {
+            return
+          }
+
+          /*
+           * Supabase may emit duplicate SIGNED_IN events
+           * when a tab is restored or regains focus.
+           */
+          if (
+            event === 'SIGNED_IN' &&
+            !userChanged &&
+            (
+              loadedAccessUserIdRef.current ===
+                nextUserId ||
+              loadingAccessUserIdRef.current ===
+                nextUserId
+            )
+          ) {
+            return
+          }
+
+          /*
+           * USER_UPDATED may contain changed metadata.
+           * Refresh in the background without removing
+           * the current screen.
+           */
+          if (
+            event === 'USER_UPDATED'
+          ) {
+            scheduleAccessContextLoad(
+              user,
+              {
+                showFullScreenLoader:
+                  false,
+
+                synchroniseInvitation:
+                  false,
+              },
+            )
+
+            return
+          }
+
+          const alreadyLoaded =
+            loadedAccessUserIdRef.current ===
+            nextUserId
+
+          const alreadyLoading =
+            loadingAccessUserIdRef.current ===
+            nextUserId
+
+          if (
+            alreadyLoaded ||
+            alreadyLoading
+          ) {
+            return
+          }
+
+          const shouldShowFullScreenLoader =
+            userChanged ||
+            !initialAuthCompletedRef.current ||
+            !loadedAccessUserIdRef.current
+
+          scheduleAccessContextLoad(
+            user,
+            {
+              showFullScreenLoader:
+                shouldShowFullScreenLoader,
+
+              synchroniseInvitation:
+                true,
+            },
+          )
         },
       )
+
+    initialiseAuth()
 
     return () => {
       mountedRef.current = false
 
       accessRequestIdRef.current += 1
+
       activeUserIdRef.current = null
-      invitationAttemptedForUserRef.current = null
+      loadedAccessUserIdRef.current =
+        null
+
+      loadingAccessUserIdRef.current =
+        null
+
+      invitationAttemptedForUserRef.current =
+        null
 
       clearScheduledAuthTimeout()
       subscription.unsubscribe()
@@ -682,7 +1029,8 @@ export default function App() {
     clearAccessState,
     clearScheduledAuthTimeout,
     fetchAccessContext,
-    profile,
+    scheduleAccessContextLoad,
+    updateSessionState,
   ])
 
   if (loading) {
@@ -701,7 +1049,8 @@ export default function App() {
           style: {
             background: '#0f172a',
             color: '#ffffff',
-            border: '1px solid #334155',
+            border:
+              '1px solid #334155',
           },
 
           success: {
@@ -1073,7 +1422,8 @@ function LoadingScreen({ message }) {
         style={{
           width: '42px',
           height: '42px',
-          border: '4px solid #334155',
+          border:
+            '4px solid #334155',
           borderTopColor: '#2563eb',
           borderRadius: '50%',
           animation:
