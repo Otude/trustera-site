@@ -15,17 +15,22 @@ const allowedRoles = new Set([
   'worker',
 ])
 
+type AcceptInvitationRequest = {
+  invitationId?: string
+}
+
 type JsonBody = Record<string, unknown>
 
-type CompanyInvitation = {
+type InvitationRecord = {
   id: string
   company_id: string
-  email: string | null
+  email: string
   full_name: string | null
-  role: string | null
-  status: string | null
+  role: string
+  status: string
   auth_user_id: string | null
   expires_at: string | null
+  accepted_at: string | null
 }
 
 function getCorsHeaders(request: Request) {
@@ -60,27 +65,25 @@ function jsonResponse(
 }
 
 function normaliseEmail(value?: string | null) {
-  return String(value ?? '')
+  return String(value || '')
     .trim()
     .toLowerCase()
 }
 
 function normaliseRole(value?: string | null) {
-  const role = String(value ?? '')
+  return String(value || 'staff')
     .trim()
     .toLowerCase()
-
-  return allowedRoles.has(role) ? role : 'staff'
+    .replaceAll('-', '_')
+    .replaceAll(' ', '_')
 }
 
-function invitationHasExpired(
-  expiresAt?: string | null,
-) {
-  if (!expiresAt) {
+function invitationHasExpired(value: string | null) {
+  if (!value) {
     return false
   }
 
-  const expiryDate = new Date(expiresAt)
+  const expiryDate = new Date(value)
 
   return (
     !Number.isNaN(expiryDate.getTime()) &&
@@ -182,26 +185,46 @@ Deno.serve(async (request) => {
       )
     }
 
-    const email = normaliseEmail(user.email)
+    let body: AcceptInvitationRequest = {}
 
-    if (!email) {
+    try {
+      const rawBody = await request.text()
+
+      if (rawBody.trim()) {
+        body = JSON.parse(
+          rawBody,
+        ) as AcceptInvitationRequest
+      }
+    } catch {
       return jsonResponse(
         request,
         {
-          error:
-            'The authenticated account does not have an email address.',
+          error: 'The request body is not valid JSON.',
         },
         400,
       )
     }
 
-    /*
-     * Prefer the invitation explicitly linked to this Auth user.
-     */
-    const {
-      data: linkedInvitationRows,
-      error: linkedInvitationError,
-    } = await adminClient
+    const requestedInvitationId = String(
+      body.invitationId ||
+        user.user_metadata?.invitation_id ||
+        '',
+    ).trim()
+
+    const userEmail = normaliseEmail(user.email)
+
+    if (!userEmail) {
+      return jsonResponse(
+        request,
+        {
+          error:
+            'The authenticated user does not have an email address.',
+        },
+        400,
+      )
+    }
+
+    let invitationQuery = adminClient
       .from('company_invitations')
       .select(`
         id,
@@ -211,111 +234,87 @@ Deno.serve(async (request) => {
         role,
         status,
         auth_user_id,
-        expires_at
+        expires_at,
+        accepted_at
       `)
-      .eq('auth_user_id', user.id)
-      .eq('status', 'pending')
-      .order('created_at', {
-        ascending: false,
-      })
-      .limit(1)
 
-    if (linkedInvitationError) {
-      throw linkedInvitationError
-    }
-
-    let invitation =
-      (linkedInvitationRows?.[0] ??
-        null) as CompanyInvitation | null
-
-    /*
-     * Legacy fallback:
-     * Older invitations may not have auth_user_id populated.
-     *
-     * Only use an email-matched invitation where auth_user_id
-     * is still null. This prevents accepting an invitation
-     * already linked to another Auth account.
-     */
-    if (!invitation) {
-      const {
-        data: emailInvitationRows,
-        error: emailInvitationError,
-      } = await adminClient
-        .from('company_invitations')
-        .select(`
-          id,
-          company_id,
-          email,
-          full_name,
-          role,
-          status,
-          auth_user_id,
-          expires_at
-        `)
-        .ilike('email', email)
-        .eq('status', 'pending')
-        .is('auth_user_id', null)
+    if (requestedInvitationId) {
+      invitationQuery = invitationQuery.eq(
+        'id',
+        requestedInvitationId,
+      )
+    } else {
+      invitationQuery = invitationQuery
+        .ilike('email', userEmail)
+        .in('status', [
+          'pending',
+          'accepted',
+        ])
         .order('created_at', {
           ascending: false,
         })
         .limit(1)
-
-      if (emailInvitationError) {
-        throw emailInvitationError
-      }
-
-      invitation =
-        (emailInvitationRows?.[0] ??
-          null) as CompanyInvitation | null
     }
 
-    /*
-     * Idempotent behaviour:
-     * this function can run after every successful login.
-     */
+    const {
+      data: invitationRows,
+      error: invitationLookupError,
+    } = await invitationQuery
+
+    if (invitationLookupError) {
+      throw invitationLookupError
+    }
+
+    const invitation =
+      (invitationRows?.[0] ??
+        null) as InvitationRecord | null
+
     if (!invitation) {
-      const {
-        data: existingProfile,
-        error: existingProfileError,
-      } = await adminClient
-        .from('profiles')
-        .select(
-          'id, company_id, email, full_name, role',
-        )
-        .eq('id', user.id)
-        .maybeSingle()
-
-      if (existingProfileError) {
-        throw existingProfileError
-      }
-
-      return jsonResponse(request, {
-        success: true,
-        accepted: false,
-        alreadyConfigured: Boolean(existingProfile),
-        message: existingProfile
-          ? 'This account is already configured.'
-          : 'No pending invitation exists for this account.',
-        profile: existingProfile ?? null,
-      })
+      return jsonResponse(
+        request,
+        {
+          error:
+            'No matching company invitation was found.',
+        },
+        404,
+      )
     }
 
     const invitationEmail = normaliseEmail(
       invitation.email,
     )
 
-    if (!invitationEmail || invitationEmail !== email) {
+    if (
+      !invitationEmail ||
+      invitationEmail !== userEmail
+    ) {
       return jsonResponse(
         request,
         {
           error:
-            'This invitation does not belong to the authenticated account.',
+            'This invitation does not belong to the authenticated user.',
         },
         403,
       )
     }
 
+    const invitationRole = normaliseRole(
+      invitation.role,
+    )
+
+    if (!allowedRoles.has(invitationRole)) {
+      return jsonResponse(
+        request,
+        {
+          error:
+            'The invitation contains an unsupported role.',
+        },
+        400,
+      )
+    }
+
     if (
+      invitation.status === 'accepted' &&
       invitation.auth_user_id &&
       invitation.auth_user_id !== user.id
     ) {
@@ -323,20 +322,60 @@ Deno.serve(async (request) => {
         request,
         {
           error:
-            'This invitation is linked to a different authenticated account.',
+            'This invitation has already been accepted by another user.',
         },
-        403,
+        409,
       )
     }
 
-    if (!invitation.company_id) {
+    if (
+      invitation.status === 'accepted' &&
+      (
+        !invitation.auth_user_id ||
+        invitation.auth_user_id === user.id
+      )
+    ) {
+      const {
+        data: existingProfile,
+        error: existingProfileError,
+      } = await adminClient
+        .from('profiles')
+        .select(`
+          id,
+          company_id,
+          email,
+          full_name,
+          role,
+          created_at
+        `)
+        .eq('id', user.id)
+        .maybeSingle()
+
+      if (existingProfileError) {
+        throw existingProfileError
+      }
+
+      if (existingProfile) {
+        return jsonResponse(request, {
+          success: true,
+          accepted: true,
+          alreadyAccepted: true,
+          message:
+            'The invitation has already been accepted.',
+          invitationId: invitation.id,
+          profile: existingProfile,
+        })
+      }
+    }
+
+    if (invitation.status !== 'pending') {
       return jsonResponse(
         request,
         {
           error:
-            'The invitation is not assigned to a company.',
+            'This invitation is no longer pending.',
         },
-        400,
+        409,
       )
     }
 
@@ -354,17 +393,33 @@ Deno.serve(async (request) => {
           .eq('status', 'pending')
 
       if (expiryUpdateError) {
-        throw expiryUpdateError
+        console.error(
+          'Unable to mark invitation as expired:',
+          expiryUpdateError,
+        )
       }
 
       return jsonResponse(
         request,
         {
           error:
-            'This invitation has expired. Ask an administrator to send a new invitation.',
-          expired: true,
+            'This invitation has expired. Ask your organisation administrator to resend it.',
         },
         410,
+      )
+    }
+
+    if (
+      invitation.auth_user_id &&
+      invitation.auth_user_id !== user.id
+    ) {
+      return jsonResponse(
+        request,
+        {
+          error:
+            'This invitation is linked to another authenticated user.',
+        },
+        409,
       )
     }
 
@@ -386,14 +441,14 @@ Deno.serve(async (request) => {
         request,
         {
           error:
-            'The company associated with this invitation no longer exists.',
+            'The company attached to this invitation could not be found.',
         },
         404,
       )
     }
 
     const companyStatus = String(
-      company.status ?? '',
+      company.status || '',
     )
       .trim()
       .toLowerCase()
@@ -407,125 +462,95 @@ Deno.serve(async (request) => {
         request,
         {
           error:
-            'This company cannot accept new users in its current status.',
+            'This company cannot accept invitations in its current status.',
         },
-        400,
+        409,
       )
     }
 
-    const invitedRole = normaliseRole(
-      invitation.role,
-    )
-
-    /*
-     * Check whether this Auth user already has a profile.
-     *
-     * Never silently move an existing profile from one
-     * company to another.
-     */
     const {
-      data: existingProfile,
-      error: existingProfileError,
+      data: profileWithSameEmail,
+      error: profileEmailError,
     } = await adminClient
       .from('profiles')
-      .select(
-        'id, company_id, email, full_name, role',
-      )
-      .eq('id', user.id)
+      .select('id, company_id, email')
+      .ilike('email', userEmail)
       .maybeSingle()
 
-    if (existingProfileError) {
-      throw existingProfileError
+    if (profileEmailError) {
+      throw profileEmailError
     }
 
     if (
-      existingProfile?.company_id &&
-      existingProfile.company_id !==
+      profileWithSameEmail &&
+      profileWithSameEmail.id !== user.id
+    ) {
+      return jsonResponse(
+        request,
+        {
+          error:
+            'A different Trustera profile already uses this email address.',
+        },
+        409,
+      )
+    }
+
+    if (
+      profileWithSameEmail?.company_id &&
+      profileWithSameEmail.company_id !==
         invitation.company_id
     ) {
       return jsonResponse(
         request,
         {
           error:
-            'This account already belongs to another company.',
+            'This user already belongs to another company.',
         },
         409,
       )
     }
 
-    /*
-     * Also prevent duplicate profiles for the same email
-     * under a different Auth user ID.
-     */
-    const {
-      data: matchingEmailProfiles,
-      error: matchingEmailProfileError,
-    } = await adminClient
-      .from('profiles')
-      .select('id, company_id, email')
-      .ilike('email', email)
-      .neq('id', user.id)
-      .limit(1)
+    const fullName =
+      String(
+        invitation.full_name ||
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          '',
+      ).trim() || null
 
-    if (matchingEmailProfileError) {
-      throw matchingEmailProfileError
-    }
-
-    const duplicateEmailProfile =
-      matchingEmailProfiles?.[0] ?? null
-
-    if (duplicateEmailProfile) {
-      return jsonResponse(
-        request,
-        {
-          error:
-            'A different Trustera account already uses this email address.',
-        },
-        409,
-      )
-    }
-
-    const acceptedAt = new Date().toISOString()
-
-    const profilePayload = {
-      id: user.id,
-      company_id: invitation.company_id,
-      email,
-      full_name:
-        String(invitation.full_name ?? '').trim() ||
-        String(
-          user.user_metadata?.full_name ?? '',
-        ).trim() ||
-        null,
-      role: invitedRole,
-    }
-
-    /*
-     * The profiles table currently does not require or expose
-     * an updated_at column, so it is intentionally omitted.
-     */
     const {
       data: acceptedProfile,
       error: profileUpsertError,
     } = await adminClient
       .from('profiles')
-      .upsert(profilePayload, {
-        onConflict: 'id',
-      })
-      .select(
-        'id, company_id, email, full_name, role',
+      .upsert(
+        {
+          id: user.id,
+          company_id: invitation.company_id,
+          email: userEmail,
+          full_name: fullName,
+          role: invitationRole,
+        },
+        {
+          onConflict: 'id',
+        },
       )
+      .select(`
+        id,
+        company_id,
+        email,
+        full_name,
+        role,
+        created_at
+      `)
       .single()
 
     if (profileUpsertError) {
       throw profileUpsertError
     }
 
-    /*
-     * Mark the invitation accepted only if it remains pending.
-     * maybeSingle() lets us handle a concurrent acceptance
-     * without turning a harmless repeat into a server error.
-     */
+    const acceptedAt = new Date().toISOString()
+
     const {
       data: acceptedInvitation,
       error: invitationUpdateError,
@@ -538,12 +563,12 @@ Deno.serve(async (request) => {
         updated_at: acceptedAt,
       })
       .eq('id', invitation.id)
+      .eq('company_id', invitation.company_id)
       .eq('status', 'pending')
       .select(`
         id,
         company_id,
         email,
-        full_name,
         role,
         status,
         auth_user_id,
@@ -551,97 +576,62 @@ Deno.serve(async (request) => {
       `)
       .maybeSingle()
 
-    if (invitationUpdateError) {
+    if (
+      invitationUpdateError ||
+      !acceptedInvitation
+    ) {
       /*
-       * Do not remove an existing profile that pre-dated this
-       * function call. Only remove the profile if this call
-       * created it and the invitation could not be accepted.
+       * Roll back the newly linked company profile if the
+       * invitation could not be atomically moved out of
+       * pending state. This avoids leaving an active
+       * company user with a still-pending invitation.
        */
-      if (!existingProfile) {
-        const { error: rollbackProfileError } =
-          await adminClient
-            .from('profiles')
-            .delete()
-            .eq('id', user.id)
-            .eq(
-              'company_id',
-              invitation.company_id,
-            )
+      const { error: rollbackError } =
+        await adminClient
+          .from('profiles')
+          .delete()
+          .eq('id', user.id)
+          .eq('company_id', invitation.company_id)
 
-        if (rollbackProfileError) {
-          console.error(
-            'Profile rollback failed after invitation update error:',
-            rollbackProfileError,
-          )
-        }
-      }
-
-      throw invitationUpdateError
-    }
-
-    /*
-     * If another request accepted it first, confirm its final
-     * state rather than reporting a false failure.
-     */
-    let finalInvitation = acceptedInvitation
-
-    if (!finalInvitation) {
-      const {
-        data: currentInvitation,
-        error: currentInvitationError,
-      } = await adminClient
-        .from('company_invitations')
-        .select(`
-          id,
-          company_id,
-          email,
-          full_name,
-          role,
-          status,
-          auth_user_id,
-          accepted_at
-        `)
-        .eq('id', invitation.id)
-        .maybeSingle()
-
-      if (currentInvitationError) {
-        throw currentInvitationError
-      }
-
-      if (
-        currentInvitation?.status !== 'accepted' ||
-        currentInvitation.auth_user_id !== user.id
-      ) {
-        if (!existingProfile) {
-          const { error: rollbackProfileError } =
-            await adminClient
-              .from('profiles')
-              .delete()
-              .eq('id', user.id)
-              .eq(
-                'company_id',
-                invitation.company_id,
-              )
-
-          if (rollbackProfileError) {
-            console.error(
-              'Profile rollback failed after invitation state conflict:',
-              rollbackProfileError,
-            )
-          }
-        }
-
-        return jsonResponse(
-          request,
-          {
-            error:
-              'The invitation could not be accepted because its status changed.',
-          },
-          409,
+      if (rollbackError) {
+        console.error(
+          'Unable to roll back profile after invitation update failure:',
+          rollbackError,
         )
       }
 
-      finalInvitation = currentInvitation
+      throw (
+        invitationUpdateError ??
+        new Error(
+          'The invitation could not be marked as accepted.',
+        )
+      )
+    }
+
+    const { error: metadataUpdateError } =
+      await adminClient.auth.admin.updateUserById(
+        user.id,
+        {
+          user_metadata: {
+            ...user.user_metadata,
+            full_name:
+              fullName ||
+              user.user_metadata?.full_name ||
+              null,
+            company_id: invitation.company_id,
+            company_name: company.name,
+            role: invitationRole,
+            invitation_id: invitation.id,
+            invitation_status: 'accepted',
+          },
+        },
+      )
+
+    if (metadataUpdateError) {
+      console.error(
+        'Invitation accepted but Auth metadata could not be updated:',
+        metadataUpdateError,
+      )
     }
 
     const { error: auditError } =
@@ -650,18 +640,15 @@ Deno.serve(async (request) => {
         .insert({
           company_id: invitation.company_id,
           user_id: user.id,
-          user_email: email,
+          user_email: userEmail,
           action: 'team_invitation_accepted',
           entity_type: 'company_invitation',
           entity_id: invitation.id,
-          entity_name:
-            profilePayload.full_name || email,
+          entity_name: fullName || userEmail,
           details: {
             invitation_id: invitation.id,
-            company_id: invitation.company_id,
-            email,
-            full_name: profilePayload.full_name,
-            role: invitedRole,
+            email: userEmail,
+            role: invitationRole,
             accepted_at: acceptedAt,
           },
         })
@@ -676,13 +663,17 @@ Deno.serve(async (request) => {
     return jsonResponse(request, {
       success: true,
       accepted: true,
-      message: 'Invitation accepted successfully.',
+      alreadyAccepted: false,
+      message:
+        'Your company invitation has been accepted.',
+      invitationId: invitation.id,
+      companyId: invitation.company_id,
+      role: invitationRole,
       profile: acceptedProfile,
-      invitation: finalInvitation,
     })
   } catch (error) {
     console.error(
-      'Invitation acceptance function failed:',
+      'Invitation acceptance failed:',
       error,
     )
 

@@ -6,11 +6,13 @@ export const PERMISSIONS = {
     addWorkers: true,
     editWorkers: true,
     deleteWorkers: true,
+    manageWorkers: true,
 
     viewDocuments: true,
     uploadDocuments: true,
     editDocuments: true,
     deleteDocuments: true,
+    manageDocuments: true,
 
     viewNotifications: true,
     manageNotifications: true,
@@ -27,11 +29,13 @@ export const PERMISSIONS = {
     addWorkers: true,
     editWorkers: true,
     deleteWorkers: true,
+    manageWorkers: true,
 
     viewDocuments: true,
     uploadDocuments: true,
     editDocuments: true,
     deleteDocuments: true,
+    manageDocuments: true,
 
     viewNotifications: true,
     manageNotifications: true,
@@ -48,11 +52,13 @@ export const PERMISSIONS = {
     addWorkers: true,
     editWorkers: true,
     deleteWorkers: false,
+    manageWorkers: true,
 
     viewDocuments: true,
     uploadDocuments: true,
     editDocuments: true,
     deleteDocuments: false,
+    manageDocuments: true,
 
     viewNotifications: true,
     manageNotifications: true,
@@ -69,11 +75,13 @@ export const PERMISSIONS = {
     addWorkers: true,
     editWorkers: true,
     deleteWorkers: false,
+    manageWorkers: true,
 
     viewDocuments: true,
     uploadDocuments: true,
     editDocuments: true,
     deleteDocuments: false,
+    manageDocuments: true,
 
     viewNotifications: true,
     manageNotifications: true,
@@ -90,11 +98,13 @@ export const PERMISSIONS = {
     addWorkers: false,
     editWorkers: false,
     deleteWorkers: false,
+    manageWorkers: false,
 
     viewDocuments: true,
     uploadDocuments: true,
     editDocuments: false,
     deleteDocuments: false,
+    manageDocuments: false,
 
     viewNotifications: true,
     manageNotifications: false,
@@ -111,11 +121,13 @@ export const PERMISSIONS = {
     addWorkers: false,
     editWorkers: false,
     deleteWorkers: false,
+    manageWorkers: false,
 
     viewDocuments: true,
     uploadDocuments: false,
     editDocuments: false,
     deleteDocuments: false,
+    manageDocuments: false,
 
     viewNotifications: true,
     manageNotifications: false,
@@ -132,11 +144,13 @@ export const PERMISSIONS = {
     addWorkers: false,
     editWorkers: false,
     deleteWorkers: false,
+    manageWorkers: false,
 
     viewDocuments: false,
     uploadDocuments: false,
     editDocuments: false,
     deleteDocuments: false,
+    manageDocuments: false,
 
     viewNotifications: false,
     manageNotifications: false,
@@ -161,7 +175,7 @@ export function getPermissions(role) {
   const normalisedRole = normaliseRole(role)
 
   return (
-    PERMISSIONS[normalisedRole] ||
+    PERMISSIONS[normalisedRole] ??
     PERMISSIONS.worker
   )
 }
@@ -319,8 +333,7 @@ export function getRoleLabel(role) {
     platform_admin: 'Platform Administrator',
     admin: 'Administrator',
     manager: 'Manager',
-    compliance_officer:
-      'Compliance Officer',
+    compliance_officer: 'Compliance Officer',
     staff: 'Staff',
     viewer: 'Viewer',
     worker: 'Worker',

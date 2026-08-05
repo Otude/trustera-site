@@ -1126,21 +1126,47 @@ function AuthenticatedApp({
     profile?.company_id,
   )
 
-  const canManageTeam =
+  const canViewWorkers =
     hasCompany &&
-    can(profile, 'manageTeam')
-
-  const canViewAuditLogs =
-    hasCompany &&
-    can(profile, 'viewAuditLogs')
+    (
+      isPlatformAdmin ||
+      can(profile, 'viewWorkers')
+    )
 
   const canAddWorkers =
     hasCompany &&
-    can(profile, 'manageWorkers')
+    (
+      isPlatformAdmin ||
+      can(profile, 'addWorkers')
+    )
+
+  const canViewDocuments =
+    hasCompany &&
+    (
+      isPlatformAdmin ||
+      can(profile, 'viewDocuments')
+    )
 
   const canViewNotifications =
     hasCompany &&
-    can(profile, 'viewNotifications')
+    (
+      isPlatformAdmin ||
+      can(profile, 'viewNotifications')
+    )
+
+  const canViewAuditLogs =
+    hasCompany &&
+    (
+      isPlatformAdmin ||
+      can(profile, 'viewAuditLogs')
+    )
+
+  const canManageTeam =
+    hasCompany &&
+    (
+      isPlatformAdmin ||
+      can(profile, 'manageTeam')
+    )
 
   const defaultAuthenticatedRoute =
     isPlatformAdmin && !hasCompany
@@ -1236,7 +1262,7 @@ function AuthenticatedApp({
         <Route
           path="/workers"
           element={
-            hasCompany ? (
+            canViewWorkers ? (
               <Workers
                 profile={profile}
               />
@@ -1257,7 +1283,7 @@ function AuthenticatedApp({
         <Route
           path="/workers/:id"
           element={
-            hasCompany ? (
+            canViewWorkers ? (
               <WorkerProfile
                 profile={profile}
               />
@@ -1300,7 +1326,7 @@ function AuthenticatedApp({
         <Route
           path="/documents"
           element={
-            hasCompany ? (
+            canViewDocuments ? (
               <Documents
                 profile={profile}
               />
