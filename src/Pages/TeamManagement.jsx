@@ -6,6 +6,10 @@ import {
 } from 'react'
 
 import { supabase } from '../supabase'
+import {
+  can,
+  canAssignRole,
+} from '../utils/permissions'
 
 const INITIAL_INVITE_FORM = {
   fullName: '',
@@ -15,22 +19,34 @@ const INITIAL_INVITE_FORM = {
 
 const ROLE_OPTIONS = [
   {
-    value: 'admin',
-    label: 'Administrator',
-    description:
-      'Full company access, including team management and compliance records.',
-  },
-  {
     value: 'manager',
     label: 'Manager',
     description:
       'Can manage workers, documents, notifications and compliance activity.',
   },
   {
+    value: 'compliance_officer',
+    label: 'Compliance Officer',
+    description:
+      'Can manage compliance records, documents, alerts and audit activity.',
+  },
+  {
     value: 'staff',
     label: 'Staff',
     description:
       'Standard operational access with restricted administrative permissions.',
+  },
+  {
+    value: 'viewer',
+    label: 'Viewer',
+    description:
+      'Read-only access to permitted workforce and compliance information.',
+  },
+  {
+    value: 'worker',
+    label: 'Worker',
+    description:
+      'Restricted access intended for worker-facing functionality.',
   },
 ]
 
@@ -84,10 +100,12 @@ const SUPPORTED_PROFILE_ROLES = new Set([
   'worker',
 ])
 
-const TEAM_MANAGEMENT_ROLES = new Set([
-  'admin',
+const ASSIGNABLE_COMPANY_ROLES = new Set([
   'manager',
+  'compliance_officer',
   'staff',
+  'viewer',
+  'worker',
 ])
 
 const OUTSTANDING_INVITATION_STATUSES = new Set([
@@ -275,7 +293,7 @@ async function getFunctionErrorMessage(
   }
 
   try {
-    const responseBody = await context.json()
+    const responseBody = await context.clone().json()
 
     if (
       responseBody &&
@@ -386,12 +404,9 @@ export default function TeamManagement({
     profile?.id ||
     null
 
-  const currentUserRole = normaliseRole(
-    profile?.role,
-  )
 
   const canManageTeam =
-    currentUserRole === 'admin'
+    can(profile, 'manageTeam')
 
   const clearMessages = useCallback(() => {
     setErrorMessage('')
@@ -506,6 +521,9 @@ export default function TeamManagement({
                 auth_user_id,
                 invited_at,
                 expires_at,
+                accepted_at,
+                cancelled_at,
+                revoked_at,
                 created_at,
                 updated_at
               `,
@@ -620,6 +638,18 @@ export default function TeamManagement({
     }
   }, [companyId, loadTeamData])
 
+  const memberEmails = useMemo(
+    () =>
+      new Set(
+        members
+          .map((member) =>
+            normaliseEmail(member.email),
+          )
+          .filter(Boolean),
+      ),
+    [members],
+  )
+
   const visibleInvitations = useMemo(
     () =>
       invitations.filter(
@@ -629,14 +659,42 @@ export default function TeamManagement({
               invitation,
             )
 
-          return (
-            OUTSTANDING_INVITATION_STATUSES.has(
+          if (
+            !OUTSTANDING_INVITATION_STATUSES.has(
               status,
             )
-          )
+          ) {
+            return false
+          }
+
+          /*
+           * Defensive display rule:
+           * an existing company profile is an active
+           * member and must not also be presented as a
+           * pending invitation.
+           *
+           * The acceptance function remains responsible
+           * for correcting the database lifecycle state.
+           */
+          const invitationEmail =
+            normaliseEmail(
+              invitation.email,
+            )
+
+          if (
+            status === 'pending' &&
+            invitationEmail &&
+            memberEmails.has(
+              invitationEmail,
+            )
+          ) {
+            return false
+          }
+
+          return true
         },
       ),
-    [invitations],
+    [invitations, memberEmails],
   )
 
   const pendingInvitations = useMemo(
@@ -780,9 +838,10 @@ export default function TeamManagement({
     }
 
     if (
-      !TEAM_MANAGEMENT_ROLES.has(
+      !ASSIGNABLE_COMPANY_ROLES.has(
         payload.role,
-      )
+      ) ||
+      !canAssignRole(profile, payload.role)
     ) {
       setErrorMessage(
         'Select a valid team role.',
@@ -907,7 +966,10 @@ export default function TeamManagement({
       return
     }
 
-    if (!TEAM_MANAGEMENT_ROLES.has(role)) {
+    if (
+      !ASSIGNABLE_COMPANY_ROLES.has(role) ||
+      !canAssignRole(profile, role)
+    ) {
       setErrorMessage(
         'That role is not supported from this screen.',
       )
@@ -1039,36 +1101,45 @@ export default function TeamManagement({
     }
 
     clearMessages()
-
     setCancellingInvitationId(
       invitation.id,
     )
 
     try {
-      const timestamp =
-        new Date().toISOString()
-
-      const {
-        data: cancelledRows,
-        error,
-      } = await supabase
-        .from('company_invitations')
-        .update({
-          status: 'cancelled',
-          updated_at: timestamp,
-        })
-        .eq('id', invitation.id)
-        .eq('company_id', companyId)
-        .eq('status', 'pending')
-        .select('id')
+      const { data, error } =
+        await supabase.functions.invoke(
+          'manage-company-invitation',
+          {
+            body: {
+              action: 'cancel',
+              companyId,
+              invitationId:
+                invitation.id,
+            },
+          },
+        )
 
       if (error) {
-        throw error
+        const message =
+          await getFunctionErrorMessage(
+            error,
+            'The invitation could not be cancelled.',
+          )
+
+        throw new Error(message)
       }
 
-      if (!cancelledRows?.length) {
+      if (data?.error) {
+        throw new Error(data.error)
+      }
+
+      if (
+        data?.success === false ||
+        data?.cancelled === false
+      ) {
         throw new Error(
-          'The invitation is no longer pending or could not be cancelled.',
+          data?.message ||
+            'The invitation could not be cancelled.',
         )
       }
 
@@ -1080,7 +1151,8 @@ export default function TeamManagement({
       )
 
       setSuccessMessage(
-        `The invitation for ${invitation.email} has been cancelled.`,
+        data?.message ||
+          `The invitation for ${invitation.email} has been cancelled.`,
       )
 
       await recordAuditLog({
@@ -1096,7 +1168,14 @@ export default function TeamManagement({
         details: {
           email: invitation.email,
           role: invitation.role,
+          auth_user_id:
+            invitation.auth_user_id ||
+            null,
         },
+      })
+
+      await loadTeamData({
+        silent: true,
       })
     } catch (error) {
       console.error(
@@ -1119,18 +1198,14 @@ export default function TeamManagement({
     if (
       !canManageTeam ||
       inviting ||
-      resendingInvitationId
+      resendingInvitationId ||
+      !companyId
     ) {
       return
     }
 
     const invitationEmail =
       normaliseEmail(invitation.email)
-
-    const invitationName =
-      getInvitationDisplayName(
-        invitation,
-      )
 
     if (
       !invitationEmail ||
@@ -1143,7 +1218,6 @@ export default function TeamManagement({
     }
 
     clearMessages()
-
     setResendingInvitationId(
       invitation.id,
     )
@@ -1151,18 +1225,13 @@ export default function TeamManagement({
     try {
       const { data, error } =
         await supabase.functions.invoke(
-          'invite-company-user',
+          'manage-company-invitation',
           {
             body: {
+              action: 'resend',
               companyId,
-              fullName:
-                invitationName,
-              email:
-                invitationEmail,
-              role: normaliseRole(
-                invitation.role,
-              ),
-              resend: true,
+              invitationId:
+                invitation.id,
             },
           },
         )
@@ -1179,6 +1248,16 @@ export default function TeamManagement({
 
       if (data?.error) {
         throw new Error(data.error)
+      }
+
+      if (
+        data?.success === false ||
+        data?.resent === false
+      ) {
+        throw new Error(
+          data?.message ||
+            'The invitation could not be resent.',
+        )
       }
 
       setSuccessMessage(
@@ -1288,7 +1367,7 @@ export default function TeamManagement({
         {!canManageTeam && (
           <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
             You can view the company team,
-            but only an administrator can
+            but your current role cannot
             invite users or change access
             permissions.
           </div>
@@ -1421,7 +1500,7 @@ export default function TeamManagement({
                 </div>
 
                 <div className="lg:col-span-3">
-                  <div className="grid gap-3 md:grid-cols-3">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                     {ROLE_OPTIONS.map(
                       (role) => {
                         const selected =
@@ -1702,7 +1781,7 @@ export default function TeamManagement({
                         const roleCanBeChanged =
                           canManageTeam &&
                           !isCurrentUser &&
-                          TEAM_MANAGEMENT_ROLES.has(
+                          ASSIGNABLE_COMPANY_ROLES.has(
                             role,
                           )
 
@@ -1764,17 +1843,22 @@ export default function TeamManagement({
                                   }
                                   className="min-h-[40px] rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                  <option value="admin">
-                                    Administrator
-                                  </option>
-
-                                  <option value="manager">
-                                    Manager
-                                  </option>
-
-                                  <option value="staff">
-                                    Staff
-                                  </option>
+                                  {ROLE_OPTIONS.map(
+                                    (option) => (
+                                      <option
+                                        key={
+                                          option.value
+                                        }
+                                        value={
+                                          option.value
+                                        }
+                                      >
+                                        {
+                                          option.label
+                                        }
+                                      </option>
+                                    ),
+                                  )}
                                 </select>
                               ) : (
                                 <span
@@ -2051,7 +2135,7 @@ export default function TeamManagement({
             Trustera access roles
           </h2>
 
-          <div className="mt-5 grid gap-4 lg:grid-cols-3">
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             {ROLE_OPTIONS.map((role) => (
               <article
                 key={role.value}

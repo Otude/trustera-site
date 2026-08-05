@@ -1,3 +1,5 @@
+// src/components/Header.jsx
+
 import {
   Link,
   useLocation,
@@ -12,140 +14,338 @@ import {
 import toast from 'react-hot-toast'
 
 import { supabase } from '../supabase'
+import {
+  can,
+  getRoleLabel,
+  isPlatformAdmin as profileIsPlatformAdmin,
+} from '../utils/permissions'
 
 const RECENT_ALERT_LIMIT = 5
-
-function normaliseRole(role) {
-  return String(role || 'staff')
-    .trim()
-    .toLowerCase()
-}
 
 function normaliseStatus(status) {
   return String(status || '')
     .trim()
     .toLowerCase()
+    .replaceAll('-', '_')
+    .replaceAll(' ', '_')
 }
 
-export default function Header({ profile, session }) {
+function getSafeEmail(session, profile) {
+  return String(
+    session?.user?.email ||
+      profile?.email ||
+      '',
+  ).trim()
+}
+
+function getEmailPrefix(email) {
+  const value = String(email || '').trim()
+
+  if (!value) return ''
+
+  return value.includes('@')
+    ? value.split('@')[0]
+    : value
+}
+
+export default function Header({
+  profile,
+  session,
+  isPlatformAdmin = false,
+}) {
   const [alerts, setAlerts] = useState(0)
-  const [email, setEmail] = useState(
-    session?.user?.email || profile?.email || '',
+
+  const [email, setEmail] = useState(() =>
+    getSafeEmail(session, profile),
   )
-  const [mobileMenuOpen, setMobileMenuOpen] =
-    useState(false)
-  const [dropdownOpen, setDropdownOpen] =
-    useState(false)
-  const [recentAlerts, setRecentAlerts] = useState([])
-  const [alertsLoading, setAlertsLoading] =
-    useState(false)
-  const [signingOut, setSigningOut] = useState(false)
+
+  const [
+    mobileMenuOpen,
+    setMobileMenuOpen,
+  ] = useState(false)
+
+  const [
+    dropdownOpen,
+    setDropdownOpen,
+  ] = useState(false)
+
+  const [
+    recentAlerts,
+    setRecentAlerts,
+  ] = useState([])
+
+  const [
+    alertsLoading,
+    setAlertsLoading,
+  ] = useState(false)
+
+  const [
+    signingOut,
+    setSigningOut,
+  ] = useState(false)
+
+  const [
+    markingAllRead,
+    setMarkingAllRead,
+  ] = useState(false)
+
+  const [
+    markingReadId,
+    setMarkingReadId,
+  ] = useState(null)
 
   const dropdownRef = useRef(null)
   const mobileMenuRef = useRef(null)
+  const mountedRef = useRef(false)
+  const alertRequestIdRef = useRef(0)
 
   const navigate = useNavigate()
   const location = useLocation()
 
-  const companyId = profile?.company_id
-  const role = normaliseRole(profile?.role)
+  const companyId =
+    profile?.company_id || null
 
-  const isAdmin = role === 'admin'
-  const canAddWorkers = ['admin', 'manager'].includes(role)
+  const hasCompany = Boolean(companyId)
 
-  const getAlerts = useCallback(async () => {
-    if (!companyId) {
-      setAlerts(0)
-      return
+  const hasPlatformAccess =
+    Boolean(isPlatformAdmin) ||
+    Boolean(profile?.is_platform_admin) ||
+    profileIsPlatformAdmin(profile)
+
+  const canViewWorkers =
+    hasCompany &&
+    can(profile, 'viewWorkers')
+
+  const canAddWorkers =
+    hasCompany &&
+    can(profile, 'addWorkers')
+
+  const canViewDocuments =
+    hasCompany &&
+    can(profile, 'viewDocuments')
+
+  const canViewNotifications =
+    hasCompany &&
+    can(profile, 'viewNotifications')
+
+  const canViewAuditLogs =
+    hasCompany &&
+    can(profile, 'viewAuditLogs')
+
+  const canManageTeam =
+    hasCompany &&
+    can(profile, 'manageTeam')
+
+  const canManagePlatform =
+    hasPlatformAccess &&
+    can(profile, 'managePlatform')
+
+  const defaultHomeRoute =
+    hasPlatformAccess && !hasCompany
+      ? '/platform-admin'
+      : '/dashboard'
+
+  const getAlerts = useCallback(
+    async (requestId) => {
+      if (
+        !companyId ||
+        !canViewNotifications
+      ) {
+        if (
+          mountedRef.current &&
+          alertRequestIdRef.current === requestId
+        ) {
+          setAlerts(0)
+        }
+
+        return
+      }
+
+      const { count, error } = await supabase
+        .from('notification_logs')
+        .select('id', {
+          count: 'exact',
+          head: true,
+        })
+        .eq('company_id', companyId)
+        .eq('is_read', false)
+
+      if (
+        !mountedRef.current ||
+        alertRequestIdRef.current !== requestId
+      ) {
+        return
+      }
+
+      if (error) {
+        console.error(
+          'Unable to load unread alert count:',
+          error,
+        )
+
+        return
+      }
+
+      setAlerts(count || 0)
+    },
+    [
+      canViewNotifications,
+      companyId,
+    ],
+  )
+
+  const getRecentAlerts = useCallback(
+    async (requestId) => {
+      if (
+        !companyId ||
+        !canViewNotifications
+      ) {
+        if (
+          mountedRef.current &&
+          alertRequestIdRef.current === requestId
+        ) {
+          setRecentAlerts([])
+        }
+
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('notification_logs')
+        .select(`
+          id,
+          company_id,
+          message,
+          document_type,
+          expiry_date,
+          status,
+          severity,
+          sent_at,
+          is_read,
+          read_at
+        `)
+        .eq('company_id', companyId)
+        .eq('is_read', false)
+        .order('sent_at', {
+          ascending: false,
+          nullsFirst: false,
+        })
+        .limit(RECENT_ALERT_LIMIT)
+
+      if (
+        !mountedRef.current ||
+        alertRequestIdRef.current !== requestId
+      ) {
+        return
+      }
+
+      if (error) {
+        console.error(
+          'Unable to load recent alerts:',
+          error,
+        )
+
+        return
+      }
+
+      setRecentAlerts(data || [])
+    },
+    [
+      canViewNotifications,
+      companyId,
+    ],
+  )
+
+  const refreshAlerts = useCallback(
+    async ({
+      showLoading = true,
+    } = {}) => {
+      const requestId =
+        alertRequestIdRef.current + 1
+
+      alertRequestIdRef.current = requestId
+
+      if (
+        !companyId ||
+        !canViewNotifications
+      ) {
+        if (mountedRef.current) {
+          setAlerts(0)
+          setRecentAlerts([])
+          setAlertsLoading(false)
+        }
+
+        return
+      }
+
+      if (
+        showLoading &&
+        mountedRef.current
+      ) {
+        setAlertsLoading(true)
+      }
+
+      try {
+        await Promise.all([
+          getAlerts(requestId),
+          getRecentAlerts(requestId),
+        ])
+      } finally {
+        if (
+          mountedRef.current &&
+          alertRequestIdRef.current === requestId
+        ) {
+          setAlertsLoading(false)
+        }
+      }
+    },
+    [
+      canViewNotifications,
+      companyId,
+      getAlerts,
+      getRecentAlerts,
+    ],
+  )
+
+  useEffect(() => {
+    mountedRef.current = true
+
+    return () => {
+      mountedRef.current = false
+      alertRequestIdRef.current += 1
     }
-
-    const { count, error } = await supabase
-      .from('notification_logs')
-      .select('id', {
-        count: 'exact',
-        head: true,
-      })
-      .eq('company_id', companyId)
-      .eq('is_read', false)
-
-    if (error) {
-      console.error(
-        'Unable to load unread alert count:',
-        error,
-      )
-      return
-    }
-
-    setAlerts(count || 0)
-  }, [companyId])
-
-  const getRecentAlerts = useCallback(async () => {
-    if (!companyId) {
-      setRecentAlerts([])
-      return
-    }
-
-    const { data, error } = await supabase
-      .from('notification_logs')
-      .select(`
-        id,
-        company_id,
-        message,
-        document_type,
-        expiry_date,
-        status,
-        severity,
-        sent_at,
-        is_read,
-        read_at
-      `)
-      .eq('company_id', companyId)
-      .eq('is_read', false)
-      .order('sent_at', {
-        ascending: false,
-        nullsFirst: false,
-      })
-      .limit(RECENT_ALERT_LIMIT)
-
-    if (error) {
-      console.error(
-        'Unable to load recent alerts:',
-        error,
-      )
-      return
-    }
-
-    setRecentAlerts(data || [])
-  }, [companyId])
-
-  const refreshAlerts = useCallback(async () => {
-    if (!companyId) return
-
-    setAlertsLoading(true)
-
-    try {
-      await Promise.all([
-        getAlerts(),
-        getRecentAlerts(),
-      ])
-    } finally {
-      setAlertsLoading(false)
-    }
-  }, [companyId, getAlerts, getRecentAlerts])
+  }, [])
 
   useEffect(() => {
     setEmail(
-      session?.user?.email || profile?.email || '',
+      getSafeEmail(session, profile),
     )
-  }, [session?.user?.email, profile?.email])
+  }, [
+    profile?.email,
+    session?.user?.email,
+  ])
 
   useEffect(() => {
-    if (!companyId) return undefined
+    if (
+      !companyId ||
+      !canViewNotifications
+    ) {
+      alertRequestIdRef.current += 1
+      setAlerts(0)
+      setRecentAlerts([])
+      setAlertsLoading(false)
 
-    refreshAlerts()
+      return undefined
+    }
+
+    void refreshAlerts({
+      showLoading: true,
+    })
 
     const channel = supabase
-      .channel(`header-notifications-${companyId}`)
+      .channel(
+        `header-notifications-${companyId}`,
+      )
       .on(
         'postgres_changes',
         {
@@ -155,15 +355,20 @@ export default function Header({ profile, session }) {
           filter: `company_id=eq.${companyId}`,
         },
         (payload) => {
-          refreshAlerts()
+          void refreshAlerts({
+            showLoading: false,
+          })
 
           if (
             payload.eventType === 'INSERT' &&
             payload.new?.message
           ) {
-            toast.error(payload.new.message, {
-              duration: 5000,
-            })
+            toast.error(
+              payload.new.message,
+              {
+                duration: 5000,
+              },
+            )
           }
         },
       )
@@ -176,22 +381,32 @@ export default function Header({ profile, session }) {
       })
 
     return () => {
-      supabase.removeChannel(channel)
+      alertRequestIdRef.current += 1
+
+      void supabase.removeChannel(channel)
     }
-  }, [companyId, refreshAlerts])
+  }, [
+    canViewNotifications,
+    companyId,
+    refreshAlerts,
+  ])
 
   useEffect(() => {
     function handleClickOutside(event) {
       if (
         dropdownRef.current &&
-        !dropdownRef.current.contains(event.target)
+        !dropdownRef.current.contains(
+          event.target,
+        )
       ) {
         setDropdownOpen(false)
       }
 
       if (
         mobileMenuRef.current &&
-        !mobileMenuRef.current.contains(event.target)
+        !mobileMenuRef.current.contains(
+          event.target,
+        )
       ) {
         setMobileMenuOpen(false)
       }
@@ -208,6 +423,7 @@ export default function Header({ profile, session }) {
       'mousedown',
       handleClickOutside,
     )
+
     document.addEventListener(
       'keydown',
       handleEscape,
@@ -218,6 +434,7 @@ export default function Header({ profile, session }) {
         'mousedown',
         handleClickOutside,
       )
+
       document.removeEventListener(
         'keydown',
         handleEscape,
@@ -231,78 +448,115 @@ export default function Header({ profile, session }) {
   }, [location.pathname])
 
   async function markAlertAsRead(id) {
-    if (!companyId || !id) return
+    if (
+      !companyId ||
+      !canViewNotifications ||
+      !id ||
+      markingReadId
+    ) {
+      return
+    }
 
-    const readTime = new Date().toISOString()
+    const readTime =
+      new Date().toISOString()
 
-    const { error } = await supabase
-      .from('notification_logs')
-      .update({
-        is_read: true,
-        read_at: readTime,
-      })
-      .eq('id', id)
-      .eq('company_id', companyId)
-      .eq('is_read', false)
+    setMarkingReadId(id)
 
-    if (error) {
+    try {
+      const { error } = await supabase
+        .from('notification_logs')
+        .update({
+          is_read: true,
+          read_at: readTime,
+        })
+        .eq('id', id)
+        .eq('company_id', companyId)
+        .eq('is_read', false)
+
+      if (error) {
+        throw error
+      }
+
+      setRecentAlerts((current) =>
+        current.filter(
+          (item) => item.id !== id,
+        ),
+      )
+
+      setAlerts((current) =>
+        Math.max(current - 1, 0),
+      )
+
+      toast.success(
+        'Notification marked as read.',
+      )
+    } catch (error) {
       console.error(
         'Unable to mark notification as read:',
         error,
       )
+
       toast.error(
-        error.message ||
+        error?.message ||
           'Unable to mark notification as read.',
       )
-      return
+    } finally {
+      setMarkingReadId(null)
     }
-
-    setRecentAlerts((current) =>
-      current.filter((item) => item.id !== id),
-    )
-
-    setAlerts((current) =>
-      Math.max(current - 1, 0),
-    )
-
-    toast.success('Notification marked as read.')
   }
 
   async function markAllAlertsAsRead() {
-    if (!companyId) return
+    if (
+      !companyId ||
+      !canViewNotifications ||
+      markingAllRead
+    ) {
+      return
+    }
 
     if (alerts === 0) {
       toast.success('No unread alerts.')
       return
     }
 
-    const readTime = new Date().toISOString()
+    const readTime =
+      new Date().toISOString()
 
-    const { error } = await supabase
-      .from('notification_logs')
-      .update({
-        is_read: true,
-        read_at: readTime,
-      })
-      .eq('company_id', companyId)
-      .eq('is_read', false)
+    setMarkingAllRead(true)
 
-    if (error) {
+    try {
+      const { error } = await supabase
+        .from('notification_logs')
+        .update({
+          is_read: true,
+          read_at: readTime,
+        })
+        .eq('company_id', companyId)
+        .eq('is_read', false)
+
+      if (error) {
+        throw error
+      }
+
+      setRecentAlerts([])
+      setAlerts(0)
+
+      toast.success(
+        'All alerts marked as read.',
+      )
+    } catch (error) {
       console.error(
         'Unable to mark all alerts as read:',
         error,
       )
+
       toast.error(
-        error.message ||
+        error?.message ||
           'Unable to mark all alerts as read.',
       )
-      return
+    } finally {
+      setMarkingAllRead(false)
     }
-
-    setRecentAlerts([])
-    setAlerts(0)
-
-    toast.success('All alerts marked as read.')
   }
 
   async function handleLogout() {
@@ -313,7 +567,8 @@ export default function Header({ profile, session }) {
     setMobileMenuOpen(false)
 
     try {
-      const { error } = await supabase.auth.signOut()
+      const { error } =
+        await supabase.auth.signOut()
 
       if (error) {
         throw error
@@ -323,7 +578,10 @@ export default function Header({ profile, session }) {
         replace: true,
       })
     } catch (error) {
-      console.error('Unable to sign out:', error)
+      console.error(
+        'Unable to sign out:',
+        error,
+      )
 
       toast.error(
         error?.message ||
@@ -334,16 +592,19 @@ export default function Header({ profile, session }) {
     }
   }
 
-  function isActive(path, options = {}) {
-    const { exact = false } = options
-
+  function isActive(
+    path,
+    { exact = false } = {},
+  ) {
     if (exact) {
       return location.pathname === path
     }
 
     return (
       location.pathname === path ||
-      location.pathname.startsWith(`${path}/`)
+      location.pathname.startsWith(
+        `${path}/`,
+      )
     )
   }
 
@@ -362,33 +623,45 @@ export default function Header({ profile, session }) {
     })
   }
 
-  function formatExpiryDate(dateValue) {
+  function formatExpiryDate(
+    dateValue,
+  ) {
     if (!dateValue) return '-'
 
-    const date = new Date(`${dateValue}T00:00:00`)
+    const rawValue =
+      String(dateValue).trim()
+
+    const date = rawValue.includes('T')
+      ? new Date(rawValue)
+      : new Date(`${rawValue}T00:00:00`)
 
     if (Number.isNaN(date.getTime())) {
-      return dateValue
+      return rawValue
     }
 
-    return date.toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    })
+    return date.toLocaleDateString(
+      'en-GB',
+      {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      },
+    )
   }
 
   function getStatusStyle(status) {
     const normalisedStatus =
       normaliseStatus(status)
 
-    if (normalisedStatus === 'expired') {
+    if (
+      normalisedStatus === 'expired'
+    ) {
       return styles.statusExpired
     }
 
     if (
-      normalisedStatus === 'expiring soon' ||
-      normalisedStatus === 'expiring_soon'
+      normalisedStatus ===
+      'expiring_soon'
     ) {
       return styles.statusSoon
     }
@@ -397,29 +670,56 @@ export default function Header({ profile, session }) {
   }
 
   function getUserInitial() {
-    const source =
+    const source = String(
       profile?.full_name ||
-      email ||
-      'T'
+        email ||
+        'T',
+    ).trim()
 
-    return source.charAt(0).toUpperCase()
+    return (
+      source.charAt(0).toUpperCase() ||
+      'T'
+    )
   }
 
   function getDisplayName() {
-    if (profile?.full_name) {
-      return profile.full_name
+    const profileName = String(
+      profile?.full_name || '',
+    ).trim()
+
+    if (profileName) {
+      return profileName
     }
 
-    return email || 'Trustera user'
+    return (
+      getEmailPrefix(email) ||
+      'Trustera user'
+    )
   }
 
   function toggleAlertDropdown() {
-    setDropdownOpen((current) => !current)
+    if (!canViewNotifications) {
+      return
+    }
+
+    setDropdownOpen(
+      (current) => !current,
+    )
+
     setMobileMenuOpen(false)
+
+    if (!dropdownOpen) {
+      void refreshAlerts({
+        showLoading: false,
+      })
+    }
   }
 
   function toggleMobileMenu() {
-    setMobileMenuOpen((current) => !current)
+    setMobileMenuOpen(
+      (current) => !current,
+    )
+
     setDropdownOpen(false)
   }
 
@@ -431,11 +731,13 @@ export default function Header({ profile, session }) {
           style={styles.leftSection}
         >
           <Link
-            to="/dashboard"
+            to={defaultHomeRoute}
             style={styles.logoLink}
-            aria-label="Go to Trustera dashboard"
+            aria-label="Go to Trustera home"
           >
-            <span style={styles.logoMark}>T</span>
+            <span style={styles.logoMark}>
+              T
+            </span>
 
             <span style={styles.logoText}>
               Trustera
@@ -452,10 +754,14 @@ export default function Header({ profile, session }) {
                 ? 'Close navigation menu'
                 : 'Open navigation menu'
             }
-            aria-expanded={mobileMenuOpen}
+            aria-expanded={
+              mobileMenuOpen
+            }
             aria-controls="trustera-main-navigation"
           >
-            {mobileMenuOpen ? '✕' : '☰'}
+            {mobileMenuOpen
+              ? '✕'
+              : '☰'}
           </button>
 
           <nav
@@ -468,208 +774,347 @@ export default function Header({ profile, session }) {
             style={styles.nav}
             aria-label="Trustera navigation"
           >
-            <HeaderNavLink
-              to="/dashboard"
-              label="Dashboard"
-              active={isActive('/dashboard')}
-            />
+            {hasCompany && (
+              <HeaderNavLink
+                to="/dashboard"
+                label="Dashboard"
+                active={isActive(
+                  '/dashboard',
+                  {
+                    exact: true,
+                  },
+                )}
+              />
+            )}
 
-            <HeaderNavLink
-              to="/workers"
-              label="Workers"
-              active={isActive('/workers')}
-            />
+            {canViewWorkers && (
+              <HeaderNavLink
+                to="/workers"
+                label="Workers"
+                active={isActive(
+                  '/workers',
+                )}
+              />
+            )}
 
             {canAddWorkers && (
               <HeaderNavLink
                 to="/add-worker"
                 label="Add Worker"
-                active={isActive('/add-worker', {
-                  exact: true,
-                })}
+                active={isActive(
+                  '/add-worker',
+                  {
+                    exact: true,
+                  },
+                )}
               />
             )}
 
-            <HeaderNavLink
-              to="/documents"
-              label="Documents"
-              active={isActive('/documents')}
-            />
+            {canViewDocuments && (
+              <HeaderNavLink
+                to="/documents"
+                label="Documents"
+                active={isActive(
+                  '/documents',
+                )}
+              />
+            )}
 
-            <HeaderNavLink
-              to="/notifications"
-              label="Notifications"
-              active={isActive('/notifications')}
-              badge={alerts}
-            />
+            {canViewNotifications && (
+              <HeaderNavLink
+                to="/notifications"
+                label="Notifications"
+                active={isActive(
+                  '/notifications',
+                )}
+                badge={alerts}
+              />
+            )}
 
-            {isAdmin && (
+            {canViewAuditLogs && (
               <HeaderNavLink
                 to="/audit-logs"
                 label="Audit Logs"
-                active={isActive('/audit-logs')}
+                active={isActive(
+                  '/audit-logs',
+                )}
               />
             )}
 
-            {isAdmin && (
+            {canManageTeam && (
               <HeaderNavLink
                 to="/team"
                 label="Team"
-                active={isActive('/team')}
+                active={isActive(
+                  '/team',
+                )}
+              />
+            )}
+
+            {canManagePlatform && (
+              <HeaderNavLink
+                to="/platform-admin"
+                label="Platform"
+                active={isActive(
+                  '/platform-admin',
+                )}
               />
             )}
           </nav>
         </div>
 
         <div style={styles.rightSection}>
-          <div
-            style={styles.alertWrapper}
-            ref={dropdownRef}
-          >
-            <button
-              type="button"
-              onClick={toggleAlertDropdown}
-              style={{
-                ...styles.alertButton,
-                ...(alerts > 0
-                  ? styles.alertActive
-                  : styles.alertInactive),
-              }}
-              aria-label={`${alerts} unread compliance alerts`}
-              aria-expanded={dropdownOpen}
-              aria-haspopup="dialog"
+          {canViewNotifications && (
+            <div
+              style={styles.alertWrapper}
+              ref={dropdownRef}
             >
-              <span aria-hidden="true">🔔</span>
-
-              <span>
-                {alertsLoading
-                  ? 'Loading...'
-                  : `Alerts: ${alerts}`}
-              </span>
-            </button>
-
-            {dropdownOpen && (
-              <div
-                style={styles.alertDropdown}
-                role="dialog"
-                aria-label="Unread compliance alerts"
+              <button
+                type="button"
+                onClick={
+                  toggleAlertDropdown
+                }
+                style={{
+                  ...styles.alertButton,
+                  ...(alerts > 0
+                    ? styles.alertActive
+                    : styles.alertInactive),
+                }}
+                aria-label={`${alerts} unread compliance alert${
+                  alerts === 1 ? '' : 's'
+                }`}
+                aria-expanded={
+                  dropdownOpen
+                }
+                aria-haspopup="dialog"
               >
-                <div style={styles.dropdownHeader}>
-                  <div>
-                    <strong style={styles.dropdownTitle}>
-                      Unread Alerts
-                    </strong>
+                <span aria-hidden="true">
+                  🔔
+                </span>
 
-                    <p style={styles.dropdownSubText}>
-                      {alerts} unread notification
-                      {alerts === 1 ? '' : 's'}
-                    </p>
-                  </div>
+                <span>
+                  {alertsLoading
+                    ? 'Loading...'
+                    : `Alerts: ${alerts}`}
+                </span>
+              </button>
 
-                  <button
-                    type="button"
-                    onClick={markAllAlertsAsRead}
-                    disabled={alerts === 0}
-                    style={{
-                      ...styles.smallButton,
-                      ...(alerts === 0
-                        ? styles.disabledButton
-                        : {}),
-                    }}
-                  >
-                    Mark all read
-                  </button>
-                </div>
-
-                {alertsLoading ? (
-                  <p style={styles.emptyDropdown}>
-                    Loading alerts...
-                  </p>
-                ) : recentAlerts.length === 0 ? (
-                  <p style={styles.emptyDropdown}>
-                    No unread alerts.
-                  </p>
-                ) : (
-                  <div style={styles.alertList}>
-                    {recentAlerts.map((item) => (
-                      <article
-                        key={item.id}
-                        style={styles.alertItem}
-                      >
-                        <div style={styles.alertItemTop}>
-                          <strong
-                            style={styles.alertMessage}
-                          >
-                            {item.message ||
-                              'Compliance notification'}
-                          </strong>
-
-                          <span
-                            style={{
-                              ...styles.statusBadge,
-                              ...getStatusStyle(
-                                item.status,
-                              ),
-                            }}
-                          >
-                            {item.status ||
-                              'Notification'}
-                          </span>
-                        </div>
-
-                        <p style={styles.alertMeta}>
-                          <strong>Document:</strong>{' '}
-                          {item.document_type || '-'}
-                        </p>
-
-                        <p style={styles.alertMeta}>
-                          <strong>Expiry:</strong>{' '}
-                          {formatExpiryDate(
-                            item.expiry_date,
-                          )}
-                        </p>
-
-                        <p style={styles.alertMeta}>
-                          <strong>Logged:</strong>{' '}
-                          {formatDate(
-                            item.sent_at,
-                          )}
-                        </p>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            markAlertAsRead(item.id)
-                          }
-                          style={styles.markReadButton}
-                        >
-                          Mark read
-                        </button>
-                      </article>
-                    ))}
-                  </div>
-                )}
-
-                {alerts >
-                  RECENT_ALERT_LIMIT && (
-                  <p style={styles.moreAlertsText}>
-                    Showing the five most recent
-                    unread alerts.
-                  </p>
-                )}
-
-                <Link
-                  to="/notifications"
-                  onClick={() =>
-                    setDropdownOpen(false)
+              {dropdownOpen && (
+                <div
+                  style={
+                    styles.alertDropdown
                   }
-                  style={styles.viewAllLink}
+                  role="dialog"
+                  aria-label="Unread compliance alerts"
                 >
-                  View Notification Center
-                </Link>
-              </div>
-            )}
-          </div>
+                  <div
+                    style={
+                      styles.dropdownHeader
+                    }
+                  >
+                    <div>
+                      <strong
+                        style={
+                          styles.dropdownTitle
+                        }
+                      >
+                        Unread Alerts
+                      </strong>
+
+                      <p
+                        style={
+                          styles.dropdownSubText
+                        }
+                      >
+                        {alerts} unread
+                        notification
+                        {alerts === 1
+                          ? ''
+                          : 's'}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={
+                        markAllAlertsAsRead
+                      }
+                      disabled={
+                        alerts === 0 ||
+                        markingAllRead
+                      }
+                      style={{
+                        ...styles.smallButton,
+                        ...(alerts === 0 ||
+                        markingAllRead
+                          ? styles.disabledButton
+                          : {}),
+                      }}
+                    >
+                      {markingAllRead
+                        ? 'Marking...'
+                        : 'Mark all read'}
+                    </button>
+                  </div>
+
+                  {alertsLoading ? (
+                    <p
+                      style={
+                        styles.emptyDropdown
+                      }
+                    >
+                      Loading alerts...
+                    </p>
+                  ) : recentAlerts.length ===
+                    0 ? (
+                    <p
+                      style={
+                        styles.emptyDropdown
+                      }
+                    >
+                      No unread alerts.
+                    </p>
+                  ) : (
+                    <div
+                      style={styles.alertList}
+                    >
+                      {recentAlerts.map(
+                        (item) => {
+                          const isMarking =
+                            markingReadId ===
+                            item.id
+
+                          return (
+                            <article
+                              key={item.id}
+                              style={
+                                styles.alertItem
+                              }
+                            >
+                              <div
+                                style={
+                                  styles.alertItemTop
+                                }
+                              >
+                                <strong
+                                  style={
+                                    styles.alertMessage
+                                  }
+                                >
+                                  {item.message ||
+                                    'Compliance notification'}
+                                </strong>
+
+                                <span
+                                  style={{
+                                    ...styles.statusBadge,
+                                    ...getStatusStyle(
+                                      item.status,
+                                    ),
+                                  }}
+                                >
+                                  {item.status ||
+                                    'Notification'}
+                                </span>
+                              </div>
+
+                              <p
+                                style={
+                                  styles.alertMeta
+                                }
+                              >
+                                <strong>
+                                  Document:
+                                </strong>{' '}
+                                {item.document_type ||
+                                  '-'}
+                              </p>
+
+                              <p
+                                style={
+                                  styles.alertMeta
+                                }
+                              >
+                                <strong>
+                                  Expiry:
+                                </strong>{' '}
+                                {formatExpiryDate(
+                                  item.expiry_date,
+                                )}
+                              </p>
+
+                              <p
+                                style={
+                                  styles.alertMeta
+                                }
+                              >
+                                <strong>
+                                  Logged:
+                                </strong>{' '}
+                                {formatDate(
+                                  item.sent_at,
+                                )}
+                              </p>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  markAlertAsRead(
+                                    item.id,
+                                  )
+                                }
+                                disabled={
+                                  Boolean(
+                                    markingReadId,
+                                  )
+                                }
+                                style={{
+                                  ...styles.markReadButton,
+                                  ...(isMarking
+                                    ? styles.disabledButton
+                                    : {}),
+                                }}
+                              >
+                                {isMarking
+                                  ? 'Marking...'
+                                  : 'Mark read'}
+                              </button>
+                            </article>
+                          )
+                        },
+                      )}
+                    </div>
+                  )}
+
+                  {alerts >
+                    RECENT_ALERT_LIMIT && (
+                    <p
+                      style={
+                        styles.moreAlertsText
+                      }
+                    >
+                      Showing the five most
+                      recent unread alerts.
+                    </p>
+                  )}
+
+                  <Link
+                    to="/notifications"
+                    onClick={() =>
+                      setDropdownOpen(
+                        false,
+                      )
+                    }
+                    style={
+                      styles.viewAllLink
+                    }
+                  >
+                    View Notification Center
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
 
           <div
             className="trustera-header-user-box"
@@ -682,19 +1127,31 @@ export default function Header({ profile, session }) {
               {getUserInitial()}
             </div>
 
-            <div style={styles.userDetails}>
-              <span style={styles.userName}>
+            <div
+              style={styles.userDetails}
+            >
+              <span
+                style={styles.userName}
+              >
                 {getDisplayName()}
               </span>
 
-              {profile?.full_name && email && (
-                <span style={styles.email}>
+              {email && (
+                <span
+                  style={styles.email}
+                >
                   {email}
                 </span>
               )}
 
-              <span style={styles.role}>
-                {role}
+              <span
+                style={styles.role}
+              >
+                {getRoleLabel(
+                  hasPlatformAccess
+                    ? 'platform_admin'
+                    : profile?.role,
+                )}
               </span>
             </div>
           </div>
@@ -737,16 +1194,18 @@ export default function Header({ profile, session }) {
             .trustera-main-navigation {
               display: none !important;
               position: absolute;
-              top: calc(100% + 1px);
+              top: calc(100% + 13px);
               left: 0;
-              right: 0;
+              min-width: min(340px, calc(100vw - 32px));
               flex-direction: column;
               align-items: stretch !important;
               gap: 6px !important;
               padding: 14px;
-              border-bottom: 1px solid #1e293b;
+              border: 1px solid #1e293b;
+              border-radius: 0 0 12px 12px;
               background: #020817;
               box-shadow: 0 18px 35px rgba(0, 0, 0, 0.35);
+              z-index: 2100;
             }
 
             .trustera-main-navigation-open {
@@ -756,12 +1215,27 @@ export default function Header({ profile, session }) {
             .trustera-main-navigation a {
               width: 100%;
               box-sizing: border-box;
+              justify-content: flex-start !important;
             }
           }
 
           @media (max-width: 760px) {
             .trustera-header-user-box {
               display: none !important;
+            }
+          }
+
+          @media (max-width: 520px) {
+            .trustera-main-navigation {
+              position: fixed;
+              top: 72px;
+              left: 0;
+              right: 0;
+              width: auto;
+              min-width: 0;
+              border-left: 0;
+              border-right: 0;
+              border-radius: 0;
             }
           }
         `}
@@ -779,17 +1253,23 @@ function HeaderNavLink({
   return (
     <Link
       to={to}
-      aria-current={active ? 'page' : undefined}
+      aria-current={
+        active ? 'page' : undefined
+      }
       style={{
         ...styles.link,
-        ...(active ? styles.activeLink : {}),
+        ...(active
+          ? styles.activeLink
+          : {}),
       }}
     >
       <span>{label}</span>
 
       {badge > 0 && (
         <span style={styles.navBadge}>
-          {badge > 99 ? '99+' : badge}
+          {badge > 99
+            ? '99+'
+            : badge}
         </span>
       )}
     </Link>
@@ -940,7 +1420,8 @@ const styles = {
     position: 'absolute',
     top: '54px',
     right: 0,
-    width: 'min(400px, calc(100vw - 32px))',
+    width:
+      'min(400px, calc(100vw - 32px))',
     background: '#0f172a',
     border: '1px solid #334155',
     borderRadius: '14px',
@@ -986,7 +1467,6 @@ const styles = {
   },
 
   disabledButton: {
-    background: '#475569',
     cursor: 'not-allowed',
     opacity: 0.65,
   },
@@ -1095,7 +1575,7 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
-    maxWidth: '260px',
+    maxWidth: '280px',
     padding: '8px 12px',
     border: '1px solid #1e293b',
     borderRadius: '12px',
@@ -1143,7 +1623,6 @@ const styles = {
   role: {
     color: '#94a3b8',
     fontSize: '11px',
-    textTransform: 'capitalize',
   },
 
   logoutButton: {

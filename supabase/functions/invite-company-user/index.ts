@@ -80,7 +80,11 @@ function normaliseEmail(value?: string) {
 }
 
 function normaliseRole(value?: string) {
-  return value?.trim().toLowerCase() || 'staff'
+  return String(value || 'staff')
+    .trim()
+    .toLowerCase()
+    .replaceAll('-', '_')
+    .replaceAll(' ', '_')
 }
 
 function calculateExpiryDate() {
@@ -225,6 +229,11 @@ Deno.serve(async (request) => {
 
   async function deleteAuthUser(
     userId: string | null,
+    {
+      ignoreMissing = true,
+    }: {
+      ignoreMissing?: boolean
+    } = {},
   ) {
     if (!userId) {
       return
@@ -233,17 +242,40 @@ Deno.serve(async (request) => {
     const { error } =
       await adminClient.auth.admin.deleteUser(userId)
 
-    if (error) {
-      console.error(
-        'Failed to delete invited auth user:',
-        error,
-      )
+    if (!error) {
+      return
     }
+
+    const message = String(
+      error.message || '',
+    ).toLowerCase()
+
+    const userIsAlreadyMissing =
+      message.includes('user not found') ||
+      message.includes('not found')
+
+    if (
+      ignoreMissing &&
+      userIsAlreadyMissing
+    ) {
+      return
+    }
+
+    throw error
   }
 
   async function rollbackCreatedInvitation() {
     if (createdAuthUserId) {
-      await deleteAuthUser(createdAuthUserId)
+      try {
+        await deleteAuthUser(
+          createdAuthUserId,
+        )
+      } catch (error) {
+        console.error(
+          'Failed to roll back invited Auth user:',
+          error,
+        )
+      }
     }
 
     if (createdInvitationId) {
@@ -279,6 +311,7 @@ Deno.serve(async (request) => {
       .insert({
         company_id: companyId,
         user_id: userId,
+        user_email: invitedByEmail,
         action,
         entity_type: 'company_invitation',
         entity_id: invitationId,
@@ -351,7 +384,7 @@ Deno.serve(async (request) => {
       throw platformAdminError
     }
 
-    const isPlatformAdmin = Boolean(platformAdmin)
+    const isPlatformAdmin = Boolean(platformAdmin?.user_id)
 
     const callerRole = String(
       callerProfile?.role ?? '',
@@ -662,6 +695,7 @@ Deno.serve(async (request) => {
         status: 'pending',
         invited_at: invitedAt,
         expires_at: expiresAt,
+        updated_at: invitedAt,
       })
       .select('id')
       .single()
@@ -719,6 +753,7 @@ Deno.serve(async (request) => {
      * and the invitation has been verified.
      */
     const {
+      data: updatedInvitation,
       error: invitationUpdateError,
     } = await adminClient
       .from('company_invitations')
@@ -727,11 +762,23 @@ Deno.serve(async (request) => {
         updated_at: new Date().toISOString(),
       })
       .eq('id', invitation.id)
+      .eq('company_id', companyId)
       .eq('status', 'pending')
+      .select('id, auth_user_id, status')
+      .maybeSingle()
 
-    if (invitationUpdateError) {
+    if (
+      invitationUpdateError ||
+      !updatedInvitation
+    ) {
       await rollbackCreatedInvitation()
-      throw invitationUpdateError
+
+      throw (
+        invitationUpdateError ??
+        new Error(
+          'The invitation could not be linked to the invited Auth user.',
+        )
+      )
     }
 
     await recordAuditLog({
